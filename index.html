@@ -14,6 +14,7 @@
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj4KPHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIHJ4PSIxOCIgZmlsbD0iIzBkMTIxMCIvPgo8Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0MCIgZmlsbD0iIzFhMWMxNiIgc3Ryb2tlPSIjZDRjMjRhIiBzdHJva2Utd2lkdGg9IjMiLz4KPGNpcmNsZSBjeD0iNTAiIGN5PSIzNCIgcj0iOSIgZmlsbD0iI2UwNTYzYyIvPgo8Y2lyY2xlIGN4PSIzNCIgY3k9IjYyIiByPSI5IiBmaWxsPSIjZTA1NjNjIi8+CjxjaXJjbGUgY3g9IjY2IiBjeT0iNjIiIHI9IjkiIGZpbGw9IiNlMDU2M2MiLz4KPGNpcmNsZSBjeD0iNTAiIGN5PSI1MCIgcj0iMTAiIGZpbGw9IiMwZDEyMTAiIHN0cm9rZT0iI2Q0YzI0YSIgc3Ryb2tlLXdpZHRoPSIyLjUiLz4KPC9zdmc+">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -380,7 +381,8 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
     obj.updateMatrixWorld(true);
     obj.traverse(o=>{if(o.isMesh){o.frustumCulled=false;o.castShadow=false;o.receiveShadow=false;}});
     charTemplate=obj;charTemplateReady=true;
-  }catch(e){console.warn('No se pudo cargar Md_Char_Low_Poly_Man.fbx, se usa el modelo de bloques por defecto.',e);}
+    console.log('%c[Modelo FBX] Cargado correctamente ✔','color:#7fd858');
+  }catch(e){console.error('[Modelo FBX] No se pudo cargar Md_Char_Low_Poly_Man.fbx, se usa el modelo de bloques por defecto. Motivo:',e);}
 })();
 function _fbxFindBones(inst){
   const B=n=>inst.getObjectByName(n);
