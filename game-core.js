@@ -31,6 +31,9 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
 (function initCharTemplate(){
   try{
     if(typeof THREE.FBXLoader!=='function'){console.warn('FBXLoader no disponible, se usa el modelo de bloques por defecto.');return;}
+    if(!THREE.SkeletonUtils||typeof THREE.SkeletonUtils.clone!=='function'){
+      console.error('%c[Modelo FBX] THREE.SkeletonUtils no cargó (revisa que SkeletonUtils.js no esté bloqueado/404 en la pestaña Network). Sin esto, TODOS los personajes (jugadores remotos, vista previa de inventario/lobby) comparten el mismo esqueleto y NINGUNO se anima aunque el código de pose se ejecute sin errores.','color:#ff5555');
+    }
     const buf=_fbxBase64ToBuffer(FBX_CHAR_B64);
     const loader=new THREE.FBXLoader();
     const obj=loader.parse(buf,'');
@@ -48,7 +51,7 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
     // Si el modelo se ve "mirando para adentro de la pantalla" (de espaldas) en vez de de
     // frente, cambia este valor de Math.PI a 0 (o viceversa) — es lo único que depende de
     // cómo se exportó el FBX y solo se puede confirmar viéndolo en pantalla.
-    obj.rotation.y=0;
+    obj.rotation.y=Math.PI;
     obj.updateMatrixWorld(true);
     box=new THREE.Box3().setFromObject(obj);
     obj.position.x-=(box.min.x+box.max.x)/2;
@@ -74,6 +77,10 @@ function _fbxFindBones(inst){
     head:B('Head'),
     handL:B('Hand_L'),handR:B('Hand_R')
   };
+  const missing=Object.keys(bones).filter(k=>!bones[k]);
+  if(missing.length&&!_fbxFindBones._warned){_fbxFindBones._warned=true;
+    console.error('%c[Modelo FBX] No se encontraron estos huesos en el modelo: '+missing.join(', ')+'. Revisa los nombres reales de los huesos del FBX (los puedes ver imprimiendo inst.traverse en consola) y actualiza _fbxFindBones().','color:#ff5555');
+  }
   const baseX={},baseY={};
   for(const k in bones){if(bones[k]){baseX[k]=bones[k].rotation.x;baseY[k]=bones[k].rotation.y;}}
   return{bones,baseX,baseY};
