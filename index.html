@@ -415,9 +415,10 @@ d._restRotY=d.openDir*rand(1.4,1.9);d.panel.rotation.z=d._restRotZ;d.panel.posit
 if(d.broken){const sway=Math.sin(performance.now()*0.0011+d._seed)*0.05;d.pivot.rotation.y+=(d._restRotY+sway-d.pivot.rotation.y)*Math.min(1,dt*4);continue;}const target=d.open?d.openDir*1.75:0;
 d.pivot.rotation.y+=(target-d.pivot.rotation.y)*Math.min(1,dt*6);}}function resolveDoorCollision(x,z,r){for(const d of doors){const fy=d.floorY||0;if(d.open||d.broken||collY<fy-.2||collY>fy+1.5||Math.abs(x-d.x)>3||Math.abs(z-d.z)>3)continue;
 const cx=clamp(x,d.minX,d.maxX),cz=clamp(z,d.minZ,d.maxZ);const dx=x-cx,dz=z-cz,distSq=dx*dx+dz*dz;if(distSq<r*r){const dist=Math.sqrt(distSq)||0.0001,push=(r-dist)+0.001;x+=(dx/dist)*push;z+=(dz/dist)*push;}
-}return{x,z};}function damageDoor(d,dmg,source){if(d.broken)return;d.hp-=dmg;d.panel.position.x+=(Math.random()-0.5)*0.01;if(d.hp<=0){d.broken=true;d.open=true;breakDoorVisual(d);
+}return{x,z};}function netSyncDoor(d){if(window.MPNet&&MPNet.active&&window.__netDoorState)window.__netDoorState(d.netId,d.open,d.broken,d.hp);}
+function damageDoor(d,dmg,source){if(d.broken)return;d.hp-=dmg;d.panel.position.x+=(Math.random()-0.5)*0.01;if(d.hp<=0){d.broken=true;d.open=true;breakDoorVisual(d);
 if(source==='player'){showMsg('¡Derribaste la puerta! Quedó destrozada y no se puede cerrar. El ruido atrae zombies...');alertZombiesNear(d.x,d.z,15);}else{showMsg('¡Un zombie derribó una puerta! Quedó destrozada. El ruido atrae a otros...');alertZombiesNear(d.x,d.z,13);}
-}}const brokenGlassMat=new THREE.MeshLambertMaterial({color:0x9fd6e8,transparent:true,opacity:0.55,side:THREE.DoubleSide});const windows=[];function makeWindow(hingeX,hingeZ,width,height,wallAxis,sillY){
+}netSyncDoor(d);}const brokenGlassMat=new THREE.MeshLambertMaterial({color:0x9fd6e8,transparent:true,opacity:0.55,side:THREE.DoubleSide});const windows=[];function makeWindow(hingeX,hingeZ,width,height,wallAxis,sillY){
 sillY=sillY==null?0.9:sillY;const half=0.13;let minX,maxX,minZ,maxZ,cx,cz;if(wallAxis==='x'){minX=hingeX;maxX=hingeX+width;minZ=hingeZ-half;maxZ=hingeZ+half;cx=hingeX+width/2;cz=hingeZ;}
 else{minZ=hingeZ;maxZ=hingeZ+width;minX=hingeX-half;maxX=hingeX+half;cx=hingeX;cz=hingeZ+width/2;}const glass=new THREE.Mesh(new THREE.BoxGeometry(wallAxis==='x'?width:0.05,height,wallAxis==='x'?0.05:width),glassMat);
 glass.position.set(cx,sillY+height/2,cz);scene.add(glass);const w={x:cx,z:cz,minX,maxX,minZ,maxZ,hp:40,maxhp:40,broken:false,glass,width,height,wallAxis,sillY};windows.push(w);
@@ -433,7 +434,7 @@ jaggedGroup.add(shard);}w.jaggedGroup=jaggedGroup;const shardsGround=new THREE.G
 gs.rotation.x=-Math.PI/2;gs.rotation.z=rand(0,Math.PI*2);gs.position.set(w.x+rand(-0.55,0.55),gy,w.z+rand(-0.55,0.55));shardsGround.add(gs);}w.groundShards=shardsGround;}
 function damageWindow(w,dmg,source){if(w.broken)return;w.hp-=dmg;if(w.hp<=0){w.broken=true;breakWindowVisual(w);spawnBloodImpact(new THREE.Vector3(w.x,1.4,w.z),0xbfe6ee);
 if(source==='player'){showMsg('¡Rompiste la ventana! El ruido atrae zombies...');alertZombiesNear(w.x,w.z,15);}else{showMsg('¡Un zombie rompió una ventana! El ruido atrae a otros...');alertZombiesNear(w.x,w.z,13);}
-}}function alertZombiesNear(x,z,radius,full){for(const zz of zombies){if(!zz.alive)continue;const d=Math.hypot(zz.x-x,zz.z-z);if(d>radius*zz.t.hear)continue;const j=(d/radius+.2)*2;zz.lastX=x+rand(-j,j);zz.lastZ=z+rand(-j,j);zz.lastT=0;
+}if(window.MPNet&&MPNet.active&&window.__netWindowState)window.__netWindowState(w.netId,w.broken,w.hp);}function alertZombiesNear(x,z,radius,full){for(const zz of zombies){if(!zz.alive)continue;const d=Math.hypot(zz.x-x,zz.z-z);if(d>radius*zz.t.hear)continue;const j=(d/radius+.2)*2;zz.lastX=x+rand(-j,j);zz.lastZ=z+rand(-j,j);zz.lastT=0;
 zz.aware=Math.max(zz.aware,d<radius*(full||.45)?1.3:.6);}}function resolveAllCollisions(x,z,r){let res=resolveCollision(x,z,r);res=resolveDoorCollision(res.x,res.z,r);res=resolveWindowCollision(res.x,res.z,r);
 return res;}function resolveAllCollisionsExceptWindows(x,z,r){let res=resolveCollision(x,z,r);res=resolveDoorCollision(res.x,res.z,r);return res;}function pointBlockedBySolid(x,z){{const g=s=>x>=s.minX&&x<=s.maxX&&z>=s.minZ&&z<=s.maxZ&&!(s.y1!==undefined&&(collY<s.y0||collY>s.y1));if(near(x,z,0).some(g)||dynS.some(g))return true;}
 for(const d of doors){const fy=d.floorY||0;if(!d.open&& !d.broken&&x>=d.minX&&x<=d.maxX&&z>=d.minZ&&z<=d.maxZ&&collY>=fy-.2&&collY<=fy+(d.doorHeight||2.3)+.2)return true;}return false;}function pushApartFromZombies(x,z,r,excludeZombie){for(const zz of zombies){
@@ -446,14 +447,16 @@ const lidPivot=new THREE.Group();lidPivot.position.set(0,0.42,-0.25);grp.add(lid
 const c={x,z,r:0.9,opened:false,lidPivot,loot:loot||['ammo9']};lootCrates.push(c);return c;}function updateCrates(dt){for(const c of lootCrates){const ax=c.axis||'x',target=c.opened?(c.ang===undefined?-1.9:c.ang):0;
 c.lidPivot.rotation[ax]+=(target-c.lidPivot.rotation[ax])*Math.min(1,dt*5);}}function openCrate(c){if(c.opened)return;c.opened=true;const found=[];for(const id of c.loot){
 const meta=ITEMS[id];if(!meta)continue;const qty=meta.stack>1?Math.round(rand(1,Math.min(6,meta.stack))):1;addItem(id,qty);found.push(itemName(id)+' x'+qty);}showMsg((c.name||'Caja')+' abierto: '+found.join(', '));
-}const interiorLights=[];function updateLights(dt){lightFlickerT+=dt;for(const l of interiorLights){l.intensity=l._base+Math.sin(lightFlickerT*3+l._seed)*0.08;}}let lightFlickerT=0;
+if(window.MPNet&&MPNet.active&&window.__netCrateOpened)window.__netCrateOpened(c.netId);
+}function pickupGroundItem(gi){addItem(gi.id,gi.qty);scene.remove(gi.mesh);const idx=grounditems.indexOf(gi);if(idx>=0)grounditems.splice(idx,1);if(window.MPNet&&MPNet.active&&window.__netLootTaken)window.__netLootTaken(gi.netId);}
+const interiorLights=[];function updateLights(dt){lightFlickerT+=dt;for(const l of interiorLights){l.intensity=l._base+Math.sin(lightFlickerT*3+l._seed)*0.08;}}let lightFlickerT=0;
 function furnishHouse(cx,cz,halfW,halfD,dividerX){const shelfX=cx-3,shelfZ=cz+halfD-0.35;hbox(1.4,1.7,0.28,darkWoodMat,shelfX,0.85,shelfZ);hbox(1.3,0.05,0.26,woodMat,shelfX,0.5,shelfZ+0.03);
 hbox(1.3,0.05,0.26,woodMat,shelfX,1.0,shelfZ+0.03);hbox(1.3,0.05,0.26,woodMat,shelfX,1.5,shelfZ+0.03);spawnGroundItemAt(shelfX-0.35,1.07,shelfZ,'bandage',3);spawnGroundItemAt(shelfX+0.35,1.57,shelfZ,'apple',4);
 const tableX=cx-1.6,tableZ=cz-1.0;hbox(0.9,0.06,0.6,woodMat,tableX,0.72,tableZ);hbox(0.06,0.7,0.06,darkWoodMat,tableX-0.38,0.35,tableZ-0.24);hbox(0.06,0.7,0.06,darkWoodMat,tableX+0.38,0.35,tableZ-0.24);
 hbox(0.06,0.7,0.06,darkWoodMat,tableX-0.38,0.35,tableZ+0.24);hbox(0.06,0.7,0.06,darkWoodMat,tableX+0.38,0.35,tableZ+0.24);spawnGroundItemAt(tableX,0.82,tableZ,'water',2);
 makeCrate(cx-3.6,cz-2.6,['ammo9','bandage']);makeCrate(dividerX+1.8,cz+1.7,['apple','water']);const bedX=dividerX+1.9,bedZ=cz-1.5;hbox(1.7,0.35,0.9,darkWoodMat,bedX,0.18,bedZ);
 hbox(1.6,0.18,0.8,new THREE.MeshLambertMaterial({color:0xcdd6c9}),bedX,0.4,bedZ);hbox(1.7,0.4,0.12,darkWoodMat,bedX,0.4,bedZ-0.45);const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.35,0.75,10),new THREE.MeshLambertMaterial({color:0x5a6b3a}));
-barrel.position.set(cx-halfW+0.8,0.38,cz+1.5);scene.add(barrel);spawnGroundItemAt(cx-halfW+0.8,0.8,cz+1.1,'ammo9',20);}const cars=[];let isDriving=false;let drivingCar=null;
+barrel.position.set(cx-halfW+0.8,0.38,cz+1.5);scene.add(barrel);spawnGroundItemAt(cx-halfW+0.8,0.8,cz+1.1,'ammo9',20);}const cars=[];let isDriving=false;let drivingCar=null;let _carNetT=0;
 function makeCarProp(x,z,rotY,bodyColor,loot){const grp=new THREE.Group();grp.position.set(x,0,z);grp.rotation.y=rotY||0;scene.add(grp);const bodyMatC=new THREE.MeshLambertMaterial({color:bodyColor});
 const glassMatC=new THREE.MeshLambertMaterial({color:0x9fd6e8,transparent:true,opacity:0.5});const tireMat=new THREE.MeshLambertMaterial({color:0x1c1c1c});const rimMat=new THREE.MeshLambertMaterial({color:0xd0d0d0});
 const bumperMat=new THREE.MeshLambertMaterial({color:0x2a2a26});const flatTireMat=new THREE.MeshLambertMaterial({color:0x0c0c0c});const chassis=new THREE.Mesh(new THREE.BoxGeometry(1.8,0.5,4.0),bodyMatC);chassis.position.y=0.6;grp.add(chassis);
@@ -539,8 +542,10 @@ makeCarProp(0,-18,0.3,0x8a2e2e,['ammo9','bandage','water']);
 makeCrate(-8,-8,['bandage','water','ammo9']);
 flushBT();
 }
-buildIsland();
-const targets=[];const zombies=[];const bloodParticles=[];function makeZombieMesh(){const grp=new THREE.Group();scene.add(grp);const skinHue=0.27+rand(-0.03,0.04);const skinCol=new THREE.Color().setHSL(skinHue,0.32,0.30+rand(-0.06,0.05));
+(function(){const _origRandom=Math.random;function _mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}Math.random=_mulberry32(1337);buildIsland();Math.random=_origRandom;})();
+function assignNetworkIds(){doors.forEach((d,i)=>{d.netId=i;});windows.forEach((w,i)=>{w.netId=i;});lootCrates.forEach((c,i)=>{c.netId=i;});grounditems.forEach((g,i)=>{g.netId=i;});cars.forEach((c,i)=>{c.netId=i;});}
+assignNetworkIds();
+const targets=[];const zombies=[];let nextZombieNetId=0;const bloodParticles=[];function makeZombieMesh(){const grp=new THREE.Group();scene.add(grp);const skinHue=0.27+rand(-0.03,0.04);const skinCol=new THREE.Color().setHSL(skinHue,0.32,0.30+rand(-0.06,0.05));
 const clothCol=new THREE.Color().setHSL(0.30+rand(-0.05,0.05),0.28,0.14+rand(-0.04,0.05));const bodyMat=new THREE.MeshLambertMaterial({color:clothCol});const headMat=new THREE.MeshLambertMaterial({color:skinCol});
 const hips=new THREE.Group();hips.position.y=0.92;grp.add(hips);const torso=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.58,0.28),bodyMat);torso.position.y=0.40;hips.add(torso);
 const chestDetail=new THREE.Mesh(new THREE.BoxGeometry(0.52,0.14,0.06),bodyMat);chestDetail.position.set(0,0.55,0.15);hips.add(chestDetail);const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.1,0.12,6),headMat);
@@ -569,14 +574,24 @@ else if(r<.93){const c=doors.filter(d=>!d.broken&&!d.open&&Math.hypot(d.x-z.x,d.
 else z.idleT=rand(2,4);}function spawnZombie(x,z){const q=Math.random(),t=q<.6?ZT[0]:q<.85?ZT[1]:ZT[2],sc=rand(t.sc[0],t.sc[1]);const m=makeZombieMesh();m.grp.position.set(x,0,z);m.grp.scale.setScalar(sc);
 m.bodyMat.color.multiplyScalar(t.col);m.headMat.color.multiplyScalar(t===ZT[1]?1.15:t.col);zombies.push({x,z,r:.6*sc,hp:t.hp,maxhp:t.hp,speed:rand(t.sp[0],t.sp[1]),t,state:'idle',idleT:rand(.5,3),
 heading:rand(0,6.28),vx:0,vz:0,aware:0,gain:0,lastX:x,lastZ:z,lastT:99,senseT:rand(0,.2),flank:0,avoid:Math.random()<.5?-1:1,headYaw:0,headPitch:0,ap:.4,seed:rand(0,6.28),hx:x,hz:z,
-attackCd:0,alive:true,hitFlash:0,despawnTimer:0,walkPhase:rand(0,6.28),attackAnimT:0,deathAnimT:0,puddle:null,bleedTimer:0,bleedDmgPerSec:0,bleedTickTimer:0,crawlCd:0,crawlT:0,crawlWin:null,...m
+attackCd:0,alive:true,hitFlash:0,despawnTimer:0,walkPhase:rand(0,6.28),attackAnimT:0,deathAnimT:0,puddle:null,bleedTimer:0,bleedDmgPerSec:0,bleedTickTimer:0,crawlCd:0,crawlT:0,crawlWin:null,netId:nextZombieNetId++,remote:false,...m
 });}function randomZombieSpawnPos(){let x=0,z=0,n=0;collY=0;do{const r=Math.random();if(r<.5){const l=pick(CLn),a=rand(-165,165),j=rand(-3,3);if(Math.random()<.5){x=l+j;z=a;}else{z=l+j;x=a;}}else if(r<.72){x=rand(335,455);z=rand(-150,150);}else if(r<.9){x=rand(-450,-180);z=rand(-450,450);}else{x=rand(-180,190);z=rand(-450,-175);}n++;}while(n<40&&(Math.hypot(x-player.x,z-player.z)<28||pointBlockedBySolid(x,z)||(x>LK.x0-6&&x<LK.x1+4)||(z>190&&z<220)||zombies.some(zz=>zz.alive&&Math.hypot(x-zz.x,z-zz.z)<zz.r+1.2)));return{x,z};}const _bloodGeom=new THREE.BoxGeometry(0.06,0.06,0.06);const _bloodMatCache={};function _bloodMat(color){const key=color||0x8b0000;if(!_bloodMatCache[key])_bloodMatCache[key]=new THREE.MeshBasicMaterial({color:key});return _bloodMatCache[key];}
 function spawnBloodImpact(pos,color){const particleCount=10;const geom=_bloodGeom;const mat=_bloodMat(color);
 for(let i=0;i<particleCount;i++){const p=new THREE.Mesh(geom,mat);p.position.copy(pos);p.velocity=new THREE.Vector3((Math.random()-0.5)*2.8,Math.random()*2.2+1,(Math.random()-0.5)*2.8
 );p.life=0.5;scene.add(p);bloodParticles.push(p);}}function updateBloodParticles(dt){for(let i=bloodParticles.length-1;i>=0;i--){const p=bloodParticles[i];p.life-=dt;p.position.addScaledVector(p.velocity,dt);
 p.velocity.y-=9.8*dt;if(p.life<=0){scene.remove(p);bloodParticles.splice(i,1);}}}const player={x:SPAWN.x,z:SPAWN.z,yaw:0,pitch:0,speed:5.4,r:0.5,vy:0,onGround:true,_jumpY:0,standY:0,
 hp:100,maxhp:100,hunger:85,thirst:85,stamina:100,alive:true,attackCd:0
-};for(let i=0;i<1;i++){const sp=randomZombieSpawnPos();spawnZombie(sp.x,sp.z);}const weaponGroup=new THREE.Group();weaponGroup.position.set(0.26,-0.26,-0.68);weaponGroup.rotation.y=-0.03;weaponGroup.rotation.z=0.01;
+};function spawnInitialZombies(){for(let i=0;i<1;i++){const sp=randomZombieSpawnPos();spawnZombie(sp.x,sp.z);}}
+function createRemoteZombie(id,x,z,typeIdx,scale){if(zombies.some(zz=>zz.netId===id))return zombies.find(zz=>zz.netId===id);const t=ZT[typeIdx]||ZT[0];const sc=scale||1;const m=makeZombieMesh();m.grp.position.set(x,0,z);m.grp.scale.setScalar(sc);m.bodyMat.color.multiplyScalar(t.col);m.headMat.color.multiplyScalar(typeIdx===1?1.15:t.col);const zz={x,z,r:.6*sc,hp:t.hp,maxhp:t.hp,alive:true,heading:0,tx:x,tz:z,theading:0,netId:id,remote:true,hitFlash:0,standY:0,walkPhase:0,walkAmp:0,animSpeed:0,ap:.4,netMoving:0,...m};zombies.push(zz);return zz;}
+function updateRemoteZombies(dt){for(let i=zombies.length-1;i>=0;i--){const z=zombies[i];collY=z.standY||0;collZ=true;if(!z.alive){if(deadZombie(z,dt)){scene.remove(z.grp);if(z.puddle)scene.remove(z.puddle);zombies.splice(i,1);}continue;}
+z.hitFlash=Math.max(0,(z.hitFlash||0)-dt);const tint=z.hitFlash>0?0x990000:0x000000;z.bodyMat.emissive.setHex(tint);z.headMat.emissive.setHex(tint);const k=Math.min(1,dt*8);
+z.x+=((z.tx!==undefined?z.tx:z.x)-z.x)*k;z.z+=((z.tz!==undefined?z.tz:z.z)-z.z)*k;let dyaw=(z.theading||0)-z.heading;while(dyaw>Math.PI)dyaw-=Math.PI*2;while(dyaw<-Math.PI)dyaw+=Math.PI*2;z.heading+=dyaw*k;
+const standTarget=groundHeightAt(z.x,z.z,z.standY);z.standY=(z.standY===undefined?standTarget:z.standY+(standTarget-z.standY)*Math.min(1,dt*20));z.grp.position.set(z.x,z.standY,z.z);z.grp.rotation.y=z.heading;
+const targetAnimSpeed=z.netMoving?2.4:0;z.animSpeed=(z.animSpeed===undefined?targetAnimSpeed:z.animSpeed+(targetAnimSpeed-z.animSpeed)*Math.min(1,dt*6));z.walkPhase=(z.walkPhase||0)+dt*z.animSpeed;
+const targetAmp=z.animSpeed>0.45?0.85:0;z.walkAmp=(z.walkAmp===undefined?targetAmp:z.walkAmp+(targetAmp-z.walkAmp)*Math.min(1,dt*5));const swing=Math.sin(z.walkPhase)*0.55*z.walkAmp;
+z.legL.hip.rotation.x=swing;z.legR.hip.rotation.x=-swing;z.hips.position.y=0.92+Math.abs(Math.sin(z.walkPhase))*0.035*z.walkAmp;z.ap=(z.ap||.4)+((z.netMoving?1.1:.4)-(z.ap||.4))*Math.min(1,dt*4);
+z.armL.shoulder.rotation.x=-swing*0.7-z.ap;z.armR.shoulder.rotation.x=swing*0.7-z.ap;z.headPivot.rotation.y+=(0-z.headPivot.rotation.y)*Math.min(1,dt*3);}}
+const weaponGroup=new THREE.Group();weaponGroup.position.set(0.26,-0.26,-0.68);weaponGroup.rotation.y=-0.03;weaponGroup.rotation.z=0.01;
 camera.add(weaponGroup);const slideMat=new THREE.MeshLambertMaterial({color:0x3a3d3f});const frameMat=new THREE.MeshLambertMaterial({color:0x1c1c1c});const barrelMat=new THREE.MeshLambertMaterial({color:0x14161a});
 const weaponMesh=new THREE.Mesh(new THREE.BoxGeometry(0.085,0.11,0.40),slideMat);weaponMesh.position.set(0,0.04,-0.03);weaponGroup.add(weaponMesh);const weaponBarrel=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.16,8),barrelMat);
 weaponBarrel.rotation.x=Math.PI/2;weaponBarrel.position.set(0,0.04,-0.29);weaponGroup.add(weaponBarrel);const pistolGrip=new THREE.Mesh(new THREE.BoxGeometry(0.078,0.21,0.11),frameMat);
@@ -702,7 +717,8 @@ player.stamina-=18;player.attackCd=meta.cooldownHeavy||0.95;if(item.id==='axe')a
 }return;}if(isRightClick){if(player.stamina<15){showMsg('Sin energía');return;}player.stamina-=15;player.attackCd=0.8;rightPunchT=1.0;pendingMeleeHit={timer:0.15,dmg:25,rng:2.9,meta:null,bleed:false};
 }else{if(player.stamina<6)return;player.stamina-=6;player.attackCd=0.4;leftPunchT=1.0;pendingMeleeHit={timer:0.10,dmg:12,rng:2.3,meta:null,bleed:false};}}function hitTarget(t,dmg){
 t.hp-=dmg;showHitMarker();t.board.material.color.set(0xffffff);setTimeout(()=>{if(t.board)t.board.material.color.set(t.baseColor);},90);if(t.hp<=0){t.alive=false;t.grp.visible=false;t.respawn=2.5;showMsg('¡Blanco derribado!');}
-}function hitZombie(z,dmg,hitPoint,weaponMeta,hitDir){if(!z.alive)return;z.hp-=dmg;z.hitFlash=0.15;showHitMarker();if(hitPoint)spawnBloodImpact(hitPoint);if(weaponMeta&&weaponMeta.bleedDmg){
+}function hitZombie(z,dmg,hitPoint,weaponMeta,hitDir){if(!z.alive)return;if(window.MPNet&&MPNet.active&&!MPNet.isHost){z.hitFlash=0.15;showHitMarker();if(hitPoint)spawnBloodImpact(hitPoint);if(MPNet.sendZombieHit)MPNet.sendZombieHit(z.netId,dmg,weaponMeta&&weaponMeta.bleedDmg?{bleedDmg:weaponMeta.bleedDmg,bleedDuration:weaponMeta.bleedDuration}:null);return;}
+z.hp-=dmg;z.hitFlash=0.15;showHitMarker();if(hitPoint)spawnBloodImpact(hitPoint);if(weaponMeta&&weaponMeta.bleedDmg){
 z.bleedTimer=weaponMeta.bleedDuration||4.0;z.bleedDmgPerSec=weaponMeta.bleedDmg;z.bleedTickTimer=0;showMsg('¡Sangrado profundo provocado!');}if(z.hp<=0)killZombie(z,hitDir);else zombieProvoke(z);
 }function killZombie(z,hitDir){z.alive=false;z.deadT=0;z.settled=false;z.despawnTimer=12.0;showMsg('¡Zombie eliminado!');z.bodyMat.emissive.setHex(0);z.headMat.emissive.setHex(0);
 const fx=Math.sin(z.heading),fz=Math.cos(z.heading);let ix=hitDir?hitDir.x:fx*.3,iz=hitDir?hitDir.z:fz*.3;const il=Math.hypot(ix,iz)||1;ix/=il;iz/=il;const p=hitDir?3.4:1;
@@ -786,9 +802,9 @@ const tx=ax==='x'?clamp(player.x,w.minX+.4,w.maxX-.4):w.x-sg*1.3,tz=ax==='x'?w.z
 else showMsg('¡Caída! -'+Math.round(dmg)+' de salud');}function tryInteract(){if(!player.alive)return;const found=findNearestInteractable();if(!found)return;if(found.type==='car_exit'){
 isDriving=false;if(drivingCar){const sideVec=new THREE.Vector3(-1.8,0,0).applyEuler(new THREE.Euler(0,drivingCar.rotY,0));player.x=drivingCar.x+sideVec.x;player.z=drivingCar.z+sideVec.z;
 drivingCar=null;}showMsg('Saliste del auto');}else if(found.type==='car'){const car=found.ref;if(car.fuel<=0){showMsg('Este auto no tiene gasolina');}else{isDriving=true;
-drivingCar=car;showMsg('Conduciendo auto ('+Math.round(car.fuel)+'% gasolina)');}}else if(found.type==='item'){const gi=found.ref;addItem(gi.id,gi.qty);scene.remove(gi.mesh);
-grounditems.splice(grounditems.indexOf(gi),1);updateAmmoHud();}else if(found.type==='window'){vaultWindow(found.ref);}else if(found.type==='crate'){openCrate(found.ref);}else if(found.type==='door'){
-if(found.ref.broken){showMsg('La puerta está destrozada, no se puede cerrar.');}else found.ref.open=!found.ref.open;showMsg(found.ref.open?'Puerta abierta':'Puerta cerrada');
+drivingCar=car;showMsg('Conduciendo auto ('+Math.round(car.fuel)+'% gasolina)');}}else if(found.type==='item'){pickupGroundItem(found.ref);
+updateAmmoHud();}else if(found.type==='window'){vaultWindow(found.ref);}else if(found.type==='crate'){openCrate(found.ref);}else if(found.type==='door'){
+if(found.ref.broken){showMsg('La puerta está destrozada, no se puede cerrar.');}else{found.ref.open=!found.ref.open;netSyncDoor(found.ref);}showMsg(found.ref.open?'Puerta abierta':'Puerta cerrada');
 }}function startUse(invIndex){if(useAction||reloading||isDriving)return;const s=inventory[invIndex],meta=s?ITEMS[s.id]:null;if(!meta||!isConsumable(s.id))return;useAction={duration:meta.useTime||1.5,elapsed:0,perSec:{hunger:(meta.food||0)/(meta.useTime||1.5),thirst:(meta.thirst||0)/(meta.useTime||1.5),heal:(meta.heal||0)/(meta.useTime||1.5)}};
 s.qty--;if(s.qty<=0)inventory[invIndex]=null;closeAllPanels();refreshInvUI();useMesh.visible=true;document.getElementById('useIc').textContent=meta.icon;document.getElementById('useLbl').textContent=meta.useLbl;document.getElementById('useBar').style.display='flex';
 }function updateUse(dt){if(!useAction)return;useAction.elapsed+=dt;const p=clamp(useAction.elapsed/useAction.duration,0,1);player.hunger=clamp(player.hunger+useAction.perSec.hunger*dt,0,100);
@@ -836,7 +852,7 @@ for(let i=0;i<inventory.length;i++){const s=inventory[i],el=document.createEleme
 el.innerHTML=`${s?itemIcon(s.id):''}${s&&s.qty>1?`<span class="qty">${s.qty}</span>`:''}`;el.onclick=(e)=>clickSlot(e,{area:'storage',index:i});el.onmouseenter=(e)=>showTooltip(e,s?s.id:null);el.onmousemove=positionTooltip;el.onmouseleave=hideTooltip;
 grid.appendChild(el);}const nearGrid=document.getElementById('nearbyGrid');if(nearGrid){nearGrid.innerHTML='';const near=grounditems.filter(gi=>Math.hypot(gi.x-player.x,gi.z-player.z)<4.5).sort((a,b)=>Math.hypot(a.x-player.x,a.z-player.z)-Math.hypot(b.x-player.x,b.z-player.z));
 if(near.length===0){nearGrid.innerHTML='<div class="nearbyEmpty">No hay nada cerca.</div>';}else near.forEach(gi=>{const el=document.createElement('div');el.className='gslot';
-el.innerHTML=`${itemIcon(gi.id)}${gi.qty>1?`<span class="qty">${gi.qty}</span>`:''}`;el.title=itemName(gi.id);el.onclick=()=>{addItem(gi.id,gi.qty);scene.remove(gi.mesh);grounditems.splice(grounditems.indexOf(gi),1);refreshInvUI();};
+el.innerHTML=`${itemIcon(gi.id)}${gi.qty>1?`<span class="qty">${gi.qty}</span>`:''}`;el.title=itemName(gi.id);el.onclick=()=>{pickupGroundItem(gi);refreshInvUI();};
 el.onmouseenter=(e)=>showTooltip(e,gi.id);el.onmousemove=positionTooltip;el.onmouseleave=hideTooltip;nearGrid.appendChild(el);});}updateCharacterPreview();updateHeldWeaponVisibility();
 }function toggleInv(){const p=document.getElementById('invPanel');p.classList.toggle('open');if(p.classList.contains('open')){selectedLoc=null;refreshInvUI();document.exitPointerLock();}else relockAfterPanelClose();}
 document.getElementById('closeInv').onclick=()=>{document.getElementById('invPanel').classList.remove('open');relockAfterPanelClose();};function closeAllPanels(){document.getElementById('invPanel').classList.remove('open');relockAfterPanelClose();}
@@ -856,7 +872,9 @@ if(Math.abs(drivingCar.speed)>0.2){const dirSign=Math.sign(drivingCar.speed);con
 collZ=false;collY=0;const res=resolveCollisionExcept(nx,nz,1.3,drivingCar.solidObj);drivingCar.x=clamp(res.x,-ARENA+2,ARENA-2);drivingCar.z=clamp(res.z,-ARENA+2,ARENA-2);
 drivingCar.grp.position.set(drivingCar.x,0,drivingCar.z);drivingCar.grp.rotation.y=drivingCar.rotY;drivingCar.solidObj.minX=drivingCar.x-1.2;drivingCar.solidObj.maxX=drivingCar.x+1.2;
 drivingCar.solidObj.minZ=drivingCar.z-2.2;drivingCar.solidObj.maxZ=drivingCar.z+2.2;if(drivingCar.crate){const trunkOff=new THREE.Vector3(0,0,-2.4).applyEuler(new THREE.Euler(0,drivingCar.rotY,0));
-drivingCar.crate.x=drivingCar.x+trunkOff.x;drivingCar.crate.z=drivingCar.z+trunkOff.z;}player.x=drivingCar.x;player.z=drivingCar.z;player.yaw=drivingCar.rotY;player.standY=0;
+drivingCar.crate.x=drivingCar.x+trunkOff.x;drivingCar.crate.z=drivingCar.z+trunkOff.z;}
+_carNetT+=dt;if(_carNetT>1/12){_carNetT=0;if(window.MPNet&&MPNet.active&&window.__netCarState)window.__netCarState(drivingCar.netId,drivingCar.x,drivingCar.z,drivingCar.rotY,drivingCar.fuel);}
+player.x=drivingCar.x;player.z=drivingCar.z;player.yaw=drivingCar.rotY;player.standY=0;
 const camDist=5.2;const camHeight=2.2;const camOffset=new THREE.Vector3(0,camHeight,-camDist).applyEuler(new THREE.Euler(0,drivingCar.rotY,0));camera.position.set(drivingCar.x+camOffset.x,camHeight,drivingCar.z+camOffset.z);
 camera.lookAt(drivingCar.x,0.8,drivingCar.z);if(Math.abs(drivingCar.speed)>3.0){for(const z of zombies){if(z.alive&&Math.hypot(z.x-drivingCar.x,z.z-drivingCar.z)<2.0){hitZombie(z,150,new THREE.Vector3(z.x,1,z.z),null,{x:carDirX,z:carDirZ});
 }}}player.hunger=clamp(player.hunger-0.02*dt,0,100);player.thirst=clamp(player.thirst-0.035*dt,0,100);}else{if(player.vault){const v=player.vault;v.t+=dt/.5;const k=Math.min(1,v.t);player.x=v.fx+(v.tx-v.fx)*k;player.z=v.fz+(v.tz-v.fz)*k;player._jumpY=Math.sin(k*Math.PI)*.6;if(k>=1){player.vault=null;player._jumpY=0;}}
@@ -898,7 +916,7 @@ axeGroup.rotation.set(AXE_REST_ROT.x,AXE_REST_ROT.y,AXE_REST_ROT.z);}_rHandTmp.s
 _lHandTmp.set(-0.01,0.08,-0.01).applyEuler(axeGroup.rotation).add(axeGroup.position);const leftHandOffset=_lHandTmp;rightHand.position.copy(rightHandOffset);leftHand.position.copy(leftHandOffset);
 rightHand.rotation.copy(axeGroup.rotation);leftHand.rotation.copy(axeGroup.rotation);}else{leftHand.visible=rightHand.visible=true;const lpExt=Math.sin(leftPunchT*Math.PI);const rpExt=Math.sin(rightPunchT*Math.PI);
 leftHand.position.set(-0.25+lpExt*0.1,-0.28+bob,-0.35-lpExt*0.5);rightHand.position.set(0.25-rpExt*0.1,-0.28+bob,-0.35-rpExt*0.6);leftHand.rotation.set(Math.PI/2,0,lpExt* -0.5);rightHand.rotation.set(Math.PI/2,0,rpExt*0.5);
-}updateUse(dt);updateBullets(dt);updateCasings(dt);updateZombies(dt);updateBloodParticles(dt);updateDoors(dt);updateCrates(dt);updateLights(dt);worldTick(dt);playerBodyGroup.visible=player.alive&& !isDriving;
+}updateUse(dt);updateBullets(dt);updateCasings(dt);((window.MPNet&&MPNet.active&&!MPNet.isHost)?updateRemoteZombies:updateZombies)(dt);updateBloodParticles(dt);updateDoors(dt);updateCrates(dt);updateLights(dt);worldTick(dt);playerBodyGroup.visible=player.alive&& !isDriving;
 playerBodyGroup.position.set(player.x,player.standY+player._jumpY-(isCrouching?0.32:0),player.z);playerBodyGroup.rotation.y=player.yaw;if(moving&&pointerLocked&& !anyPanelOpen()&& !cannotMove&& !isDriving){
 const legSpeed=isSprinting?11:(isCrouching?4:7);legPhase+=dt*legSpeed;const legSwing=Math.sin(legPhase)*(isCrouching?0.32:0.55);legL.rotation.x=legSwing;legR.rotation.x= -legSwing;
 }else{legL.rotation.x*=0.85;legR.rotation.x*=0.85;}const nearestInt=findNearestInteractable();let helpText='';if(nearestInt){if(nearestInt.type==='car_exit')helpText='Pulsa E para salir del auto';
@@ -923,8 +941,18 @@ THREE,scene,camera,SPAWN,bullets,player,
 showMsg,flashHurt,spawnBloodImpact,showHitMarker,
 equip,ITEMS,activeSlotKey:()=>activeSlotKey,
 beginMatch,
+spawnInitialZombies,
 isAlive:()=>player.alive,
 getLocalState:()=>({x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive}),
+getZombieSnapshot:function(){return zombies.filter(z=>!z.remote).map(z=>({id:z.netId,x:+z.x.toFixed(1),z:+z.z.toFixed(1),h:+z.heading.toFixed(2),hp:Math.max(0,Math.round(z.hp)),alive:z.alive,ty:z.t===ZT[1]?1:z.t===ZT[2]?2:0,sc:z.grp.scale.x,mv:Math.hypot(z.vx||0,z.vz||0)>0.3?1:0}));},
+applyZombieSnapshot:function(list){for(const e of list){let z=zombies.find(zz=>zz.netId===e.id);if(!z)z=createRemoteZombie(e.id,e.x,e.z,e.ty,e.sc);if(!z)continue;z.tx=e.x;z.tz=e.z;z.theading=e.h;z.hp=e.hp;z.netMoving=e.mv;if(e.alive===false&&z.alive){z.alive=false;killZombie(z,{x:Math.sin(e.h),z:Math.cos(e.h)});}}},
+applyZombieHit:function(netId,dmg,bleed){const z=zombies.find(zz=>zz.netId===netId&&zz.alive&&!zz.remote);if(!z)return;z.hp-=dmg;z.hitFlash=0.15;if(bleed){z.bleedTimer=bleed.bleedDuration||4;z.bleedDmgPerSec=bleed.bleedDmg;z.bleedTickTimer=0;}if(z.hp<=0)killZombie(z);},
+hostZombieAttackTick:function(dt){if(!window.MPNet)return;for(const z of zombies){if(!z.alive||z.remote)continue;z._remAtkCd=(z._remAtkCd||0)-dt;if(z._remAtkCd>0)continue;for(const[id,rp]of MPNet.remotePlayers){if(!rp.alive)continue;const d=Math.hypot(z.x-rp.x,z.z-rp.z);if(d<z.r+0.9){if(MPNet.sendZombieDamageToPlayer)MPNet.sendZombieDamageToPlayer(id,rand(8,15)*(z.t?z.t.dm:1));z._remAtkCd=1.0;break;}}}},
+applyRemoteCarState:function(id,x,z,rot,fuel){const c=cars[id];if(!c||(isDriving&&drivingCar===c))return;c.x=x;c.z=z;c.rotY=rot;c.fuel=fuel;c.grp.position.set(x,0,z);c.grp.rotation.y=rot;c.solidObj.minX=x-1.2;c.solidObj.maxX=x+1.2;c.solidObj.minZ=z-2.2;c.solidObj.maxZ=z+2.2;if(c.crate){const trunkOff=new THREE.Vector3(0,0,-2.4).applyEuler(new THREE.Euler(0,rot,0));c.crate.x=x+trunkOff.x;c.crate.z=z+trunkOff.z;}},
+applyRemoteDoorState:function(id,open,broken,hp){const d=doors[id];if(!d)return;d.hp=hp;if(broken&&!d.broken){d.broken=true;breakDoorVisual(d);}d.open=open;},
+applyRemoteWindowState:function(id,broken,hp){const w=windows[id];if(!w)return;w.hp=hp;if(broken&&!w.broken){w.broken=true;breakWindowVisual(w);}},
+applyRemoteLootTaken:function(id){const gi=grounditems.find(g=>g.netId===id);if(!gi)return;scene.remove(gi.mesh);const idx=grounditems.indexOf(gi);if(idx>=0)grounditems.splice(idx,1);},
+applyRemoteCrateOpened:function(id){const c=lootCrates.find(cc=>cc.netId===id);if(!c||c.opened)return;c.opened=true;},
 applyRemoteDamageToLocal:function(dmg,fromName){
 if(!player.alive)return;
 player.hp=clamp(player.hp-dmg,0,player.maxhp||100);
@@ -1026,6 +1054,8 @@ const Net={
   _unsubs:[]
 };
 window.MPNet=Net;
+Net.sendZombieHit=function(netId,dmg,bleed){send({t:'zombieHit',netId,dmg,bleed});};
+Net.sendZombieDamageToPlayer=function(targetId,dmg){send({t:'hit',targetId,dmg,sourceId:'zombie',sourceName:'Zombie'});};
 
 function cleanupListeners(){Net._unsubs.forEach(u=>{try{u();}catch(e){}});Net._unsubs=[];}
 
@@ -1207,6 +1237,32 @@ function handleMessage(msg,fromPeerId,channel){
     case 'matchEnd':
       showMatchEnd(msg.winnerId===Net.myId,msg.winnerName);
       break;
+    case 'zombies':
+      if(window.__game&&window.__game.applyZombieSnapshot)window.__game.applyZombieSnapshot(msg.list);
+      break;
+    case 'zombieHit':
+      if(Net.isHost&&window.__game&&window.__game.applyZombieHit)window.__game.applyZombieHit(msg.netId,msg.dmg,msg.bleed);
+      break;
+    case 'doorState':
+      if(window.__game&&window.__game.applyRemoteDoorState)window.__game.applyRemoteDoorState(msg.id,msg.open,msg.broken,msg.hp);
+      if(Net.isHost)relayExcept(msg,fromPeerId);
+      break;
+    case 'windowState':
+      if(window.__game&&window.__game.applyRemoteWindowState)window.__game.applyRemoteWindowState(msg.id,msg.broken,msg.hp);
+      if(Net.isHost)relayExcept(msg,fromPeerId);
+      break;
+    case 'lootTaken':
+      if(window.__game&&window.__game.applyRemoteLootTaken)window.__game.applyRemoteLootTaken(msg.id);
+      if(Net.isHost)relayExcept(msg,fromPeerId);
+      break;
+    case 'crateOpened':
+      if(window.__game&&window.__game.applyRemoteCrateOpened)window.__game.applyRemoteCrateOpened(msg.id);
+      if(Net.isHost)relayExcept(msg,fromPeerId);
+      break;
+    case 'carState':
+      if(window.__game&&window.__game.applyRemoteCarState)window.__game.applyRemoteCarState(msg.id,msg.x,msg.z,msg.rot,msg.fuel);
+      if(Net.isHost)relayExcept(msg,fromPeerId);
+      break;
   }
 }
 
@@ -1298,7 +1354,22 @@ window.__netTick=function(dt){
       }
     }
   }
+  // 4) Host: transmite el estado de los zombies y hace que ataquen a jugadores remotos
+  if(Net.isHost){
+    lastZombieSend=(lastZombieSend||0)+dt;
+    if(lastZombieSend>1/12){
+      lastZombieSend=0;
+      send({t:'zombies',list:G.getZombieSnapshot()});
+    }
+    if(G.hostZombieAttackTick)G.hostZombieAttackTick(dt);
+  }
 };
+let lastZombieSend=0;
+window.__netDoorState=function(id,open,broken,hp){send({t:'doorState',id,open,broken,hp});};
+window.__netWindowState=function(id,broken,hp){send({t:'windowState',id,broken,hp});};
+window.__netLootTaken=function(id){send({t:'lootTaken',id});};
+window.__netCrateOpened=function(id){send({t:'crateOpened',id});};
+window.__netCarState=function(id,x,z,rot,fuel){send({t:'carState',id,x,z,rot,fuel});};
 let _reportedDead=false;
 function reportOwnDeath(){
   if(_reportedDead)return;_reportedDead=true;
@@ -1392,6 +1463,7 @@ function wireLobbyUI(){
 
   $('mpBtnSolo').onclick=()=>{
     document.getElementById('mpOverlay').style.display='none';
+    if(window.__game&&window.__game.spawnInitialZombies)window.__game.spawnInitialZombies();
   };
   $('mpBtnHost').onclick=async()=>{
     const name=$('mpPlayerName').value.trim()||'Host';
@@ -1403,6 +1475,7 @@ function wireLobbyUI(){
       $('mpRoomCodeDisplay').textContent=code;
       Net.onRosterChange=renderHostLobby;
       renderHostLobby();
+      if(window.__game&&window.__game.spawnInitialZombies)window.__game.spawnInitialZombies();
     }catch(e){
       $('mpHostStatus').textContent='Error: '+e.message;
       $('mpBtnHost').textContent='Crear sala (Host)';
