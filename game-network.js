@@ -248,7 +248,7 @@ function handleMessage(msg,fromPeerId,channel){
       if(!Net.isHost)startLocalMatch();
       break;
     case 'state':
-      updateRemoteAvatar(msg.id,msg.name,msg.x,msg.z,msg.yaw,msg.hp,msg.alive,msg.wKind,msg.wId,msg.jumpY);
+      updateRemoteAvatar(msg.id,msg.name,msg.x,msg.z,msg.yaw,msg.hp,msg.alive,msg.wKind,msg.wId,msg.jumpY,msg.crouch);
       if(Net.isHost)relayExcept(msg,fromPeerId);
       break;
     case 'hit':
@@ -340,7 +340,7 @@ function ensureAvatar(id,name){
   meleeProp.visible=false;handProp.add(meleeProp);
   const itemProp=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,0.14),new THREE.MeshLambertMaterial({color:0xc9b458}));itemProp.visible=false;handProp.add(itemProp);
   G.scene.add(grp);
-  const rec={grp,torso,head,nameSprite,handProp,gunProp,meleeProp,itemProp,fbxInst,x:0,z:0,yaw:0,hp:100,alive:true,name,tx:0,tz:0,tyaw:0,jumpY:0,tJumpY:0,wKind:'none'};
+  const rec={grp,torso,head,nameSprite,handProp,gunProp,meleeProp,itemProp,fbxInst,x:0,z:0,yaw:0,hp:100,alive:true,name,tx:0,tz:0,tyaw:0,jumpY:0,tJumpY:0,wKind:'none',crouch:false,crouchAmt:0,animPhase:Math.random()*6.28};
   Net.remotePlayers.set(id,rec);
   return rec;
 }
@@ -354,12 +354,13 @@ function makeNameSprite(name){
   const spr=new THREE.Sprite(mat);spr.scale.set(1.6,0.4,1);
   return spr;
 }
-function updateRemoteAvatar(id,name,x,z,yaw,hp,alive,wKind,wId,jumpY){
+function updateRemoteAvatar(id,name,x,z,yaw,hp,alive,wKind,wId,jumpY,crouch){
   if(id===Net.myId)return;
   const rec=ensureAvatar(id,name);
   if(!rec)return;
   rec.tx=x;rec.tz=z;rec.tyaw=yaw;rec.hp=hp;rec.alive=alive;rec.name=name;
   rec.tJumpY=jumpY||0;
+  rec.crouch=!!crouch;
   if(wKind&&wKind!==rec.wKind){
     rec.wKind=wKind;
     rec.gunProp.visible=wKind==='ranged';
@@ -389,22 +390,18 @@ window.__netTick=function(dt){
     let dyaw=rec.tyaw-rec.yaw;while(dyaw>Math.PI)dyaw-=Math.PI*2;while(dyaw<-Math.PI)dyaw+=Math.PI*2;
     rec.yaw+=dyaw*Math.min(1,dt*10);
     rec.jumpY+=((rec.tJumpY||0)-rec.jumpY)*Math.min(1,dt*15);
-    rec.grp.position.set(rec.x,rec.jumpY,rec.z);
+    rec.crouchAmt=(rec.crouchAmt===undefined?(rec.crouch?1:0):rec.crouchAmt+((rec.crouch?1:0)-rec.crouchAmt)*Math.min(1,dt*10));
+    rec.grp.position.set(rec.x,rec.jumpY-rec.crouchAmt*0.32,rec.z);
     rec.grp.rotation.y=rec.yaw;
     if(rec.fbxInst){
-      // La velocidad real del jugador remoto controla la velocidad de reproducción de
-      // la animación de caminata (Walking.fbx) en vez de un ciclo falso a base de senos.
+      // La velocidad real del jugador remoto controla el ciclo de caminata (piernas/brazos),
+      // y jumpY/crouch (recibidos por red) controlan las poses de salto y agachado.
       const spd=Math.hypot(rec.x-_prevX,rec.z-_prevZ)/Math.max(dt,0.0001);
-      const mixer=rec.fbxInst.userData.mixer;
-      if(mixer){
-        mixer.timeScale=spd>0.05?Math.min(2.2,0.55+spd*0.38):0;
-        mixer.update(dt);
-      }
+      const moveAmt=Math.min(1,spd/3.2);
+      rec.animPhase=(rec.animPhase||0)+dt*(6.5+moveAmt*6.5);
+      const jumpAmt=Math.min(1,Math.abs(rec.jumpY)*2.2);
       const isRanged=rec.wKind==='ranged';
-      if(isRanged){
-        const B=rec.fbxInst.userData.bones,X=rec.fbxInst.userData.baseX;
-        G.animateFbxAim(B,X,1);
-      }
+      G.poseHumanoidFbx(rec.fbxInst,{phase:rec.animPhase,moveAmt,crouchAmt:rec.crouchAmt,jumpAmt,aimAmt:isRanged?1:0});
     }
   }
   // 2) Enviar nuestro propio estado ~15 veces por segundo
@@ -412,7 +409,7 @@ window.__netTick=function(dt){
   if(lastStateSend>1/15){
     lastStateSend=0;
     const s=G.getLocalState();
-    send({t:'state',id:Net.myId,name:Net.myName,x:s.x,z:s.z,yaw:s.yaw,hp:s.hp,alive:s.alive,wKind:s.wKind,wId:s.wId,jumpY:s.jumpY});
+    send({t:'state',id:Net.myId,name:Net.myName,x:s.x,z:s.z,yaw:s.yaw,hp:s.hp,alive:s.alive,wKind:s.wKind,wId:s.wId,jumpY:s.jumpY,crouch:s.crouch});
     if(s.alive===false)reportOwnDeath();
   }
   // 3) Detección de impactos de bala contra jugadores remotos
