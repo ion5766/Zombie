@@ -1,0 +1,50 @@
+{
+  "name": "isla-3d-battle-royale",
+  "productName": "Isla 3D - Battle Royale",
+  "version": "1.0.0",
+  "description": "Battle royale de supervivencia zombie en 3D - App de escritorio",
+  "main": "main.js",
+  "author": "Tu nombre",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.tuestudio.isla3d",
+    "productName": "Isla 3D - Battle Royale",
+    "directories": {
+      "output": "dist_installers"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*"
+    ],
+    "icon": "build/icon.png",
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "build/icon.png",
+      "category": "Game"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
