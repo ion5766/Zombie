@@ -969,7 +969,13 @@ const FIREBASE_CONFIG={
   appId:"1:965583286065:web:d2b7ba006802592d3fca10"
 };
 
-const ICE_SERVERS=[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}];
+const ICE_SERVERS=[
+  {urls:"stun:stun.l.google.com:19302"},
+  {urls:"stun:stun1.l.google.com:19302"},
+  {urls:"turn:openrelay.metered.ca:80",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443",username:"openrelayproject",credential:"openrelayproject"},
+  {urls:"turn:openrelay.metered.ca:443?transport=tcp",username:"openrelayproject",credential:"openrelayproject"}
+];
 const MAX_PLAYERS=20;
 
 let fbApp=null,db=null,fbReady=false;
@@ -1061,7 +1067,8 @@ function hostConnectToPeer(pid,name,peersCol){
   const entry={pc,channel};
   Net.connections.set(pid,entry);
   wireChannel(channel,pid,name);
-  pc.onicecandidate=e=>{if(e.candidate){peersCol.doc(pid).update({offerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});}};
+  pc.onicecandidate=e=>{if(e.candidate){peersCol.doc(pid).update({offerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(err=>console.error('[MPNet] error ICE host:',err));}};
+  pc.onconnectionstatechange=()=>{console.log('[MPNet] connectionState (host, peer '+pid+'):',pc.connectionState);};
   pc.oniceconnectionstatechange=()=>{
     console.log('[MPNet] iceConnectionState (host, peer '+pid+'):',pc.iceConnectionState);
     if(pc.iceConnectionState==='failed'||pc.iceConnectionState==='closed'){handlePeerLeft(pid);}
@@ -1110,7 +1117,8 @@ async function joinRoom(code,name){
   const pc=new RTCPeerConnection({iceServers:ICE_SERVERS});
   Net.hostPC=pc;
   pc.ondatachannel=e=>{Net.hostChannel=e.channel;wireChannel(e.channel,'HOST_'+code,roomSnap.data().hostName||'Host',true);};
-  pc.onicecandidate=e=>{if(e.candidate){peerRef.update({answerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});}};
+  pc.onicecandidate=e=>{if(e.candidate){peerRef.update({answerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(err=>console.error('[MPNet] error ICE cliente:',err));}};
+  pc.onconnectionstatechange=()=>{console.log('[MPNet] connectionState (cliente):',pc.connectionState);};
   pc.oniceconnectionstatechange=()=>{
     console.log('[MPNet] iceConnectionState (cliente):',pc.iceConnectionState);
     if(Net.onIceStateChange)Net.onIceStateChange(pc.iceConnectionState);
