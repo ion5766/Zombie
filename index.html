@@ -753,10 +753,14 @@ if(z.state==='crawlIn'){z.crawlT+=dt;const T1=0.55,T2=0.85,T3=1.35;let px,pz,bod
 const T=z.t,driving=isDriving&&drivingCar&&player.alive;const d=Math.hypot(z.x-player.x,z.z-player.z);z.senseT-=dt;z.lastT+=dt;z.attackCd-=dt;if(z.senseT<=0){z.senseT=.16+Math.random()*.1;let g=0;
 if(player.alive){const hid=isCrouching&&!driving,R=(driving?18:14)*(z.state==='chase'?1.4:1);const dot=d>.01?((player.x-z.x)*Math.sin(z.heading)+(player.z-z.z)*Math.cos(z.heading))/d:1;
 const clear=d<R+4?losClear(z.x,z.z,player.x,player.z,driving?2.6:.8):false;const see=!hid&&clear&&d<R&&dot>(z.state==='chase'?-.25:.35);const near=!hid&&d<4.5&&(clear||d<2.5),touch=d<z.r+player.r+.4&&Math.abs((z.standY||0)-player.standY)<1.3;z.clr=clear&&d<26&&!segBlocked(z.x,z.z,player.x,player.z);
-const nr=zAI.noise*T.hear*(clear?1:.55),hear=nr>0&&d<nr;if(touch){g=2.5;z.aware=1.3;}else if(see)g=1.5+(1-d/R)*2.5;else if(near)g=1.3;else if(hear)g=.8+(1-d/nr)*1.6;if(g>0){const pr=(see||near||touch||driving)?0:Math.min(3,d*.2);z.lastX=player.x+rand(-pr,pr);z.lastZ=player.z+rand(-pr,pr);z.lastT=0;}
+const nr=zAI.noise*T.hear*(clear?1:.55),hear=nr>0&&d<nr;if(touch){g=2.5;z.aware=1.3;}else if(see)g=1.5+(1-d/R)*2.5;else if(near)g=1.3;else if(hear)g=.8+(1-d/nr)*1.6;if(g>0){const pr=(see||near||touch||driving)?0:Math.min(3,d*.2);z.lastX=player.x+rand(-pr,pr);z.lastZ=player.z+rand(-pr,pr);z.lastT=0;z.huntTargetId=null;}
+if(window.MPNet&&MPNet.active&&MPNet.isHost&&MPNet.remotePlayers&&MPNet.remotePlayers.size){for(const[rid,rp]of MPNet.remotePlayers){if(!rp.alive)continue;const rd=Math.hypot(z.x-rp.x,z.z-rp.z);if(rd>26)continue;const rclear=losClear(z.x,z.z,rp.x,rp.z,.8);const rsee=rclear&&rd<14;const rtouch=rd<z.r+0.9;let rg=0;if(rtouch){rg=2.5;}else if(rsee)rg=1.5+(1-rd/14)*2.5;else if(rd<4.5&&rclear)rg=1.3;if(rg>0&&(rg>=g||rd<d)){g=Math.max(g,rg);z.lastX=rp.x;z.lastZ=rp.z;z.lastT=0;z.huntTargetId=rid;}}}
 }z.gain=g;}z.aware=clamp(z.aware+(z.gain>0?z.gain:-.2)*dt,0,1.3);{const st=z.state;if(st!=='chase'&&(!z.hunt||(st!=='seek'&&st!=='bash'))){if(z.aware>=1)enterChase(z);else if(z.aware>.35&&st!=='alert'&&st!=='investigate'&&st!=='seek'&&st!=='bash'){z.state='alert';z.alertT=rand(.5,1.1);}
-}else if(st==='chase'&&z.lastT>4.5){z.state='investigate';z.hunt=false;z.tx=z.lastX;z.tz=z.lastZ;z.stT=9;z.aware=.5;}}let inRange=false;if(player.alive&&z.state==='chase'){
-if(driving){const so=drivingCar.solidObj,cx=clamp(z.x,so.minX,so.maxX),cz=clamp(z.z,so.minZ,so.maxZ);inRange=Math.hypot(z.x-cx,z.z-cz)<z.r+.9&&(z.standY||0)<1.3;}else inRange=d<z.r+player.r+.55&&Math.abs((z.standY||0)-player.standY)<1.3&&!segBlocked(z.x,z.z,player.x,player.z);
+}else if(st==='chase'&&z.lastT>4.5){z.state='investigate';z.hunt=false;z.tx=z.lastX;z.tz=z.lastZ;z.stT=9;z.aware=.5;}}let inRange=false,atkTargetId=z.huntTargetId||null,atkLocal=true,atkX=player.x,atkZ=player.z,atkAlive=player.alive,atkR=player.r,atkStandY=player.standY;
+if(atkTargetId){if(window.MPNet&&MPNet.remotePlayers&&MPNet.remotePlayers.has(atkTargetId)){const rp=MPNet.remotePlayers.get(atkTargetId);if(rp&&rp.alive){atkLocal=false;atkX=rp.x;atkZ=rp.z;atkAlive=true;atkR=0.5;atkStandY=rp.jumpY||0;}else{atkTargetId=null;z.huntTargetId=null;}}else{atkTargetId=null;z.huntTargetId=null;}}
+const dAtk=atkLocal?d:Math.hypot(z.x-atkX,z.z-atkZ);
+if(atkAlive&&z.state==='chase'){
+if(atkLocal&&driving){const so=drivingCar.solidObj,cx=clamp(z.x,so.minX,so.maxX),cz=clamp(z.z,so.minZ,so.maxZ);inRange=Math.hypot(z.x-cx,z.z-cz)<z.r+.9&&(z.standY||0)<1.3;}else inRange=dAtk<z.r+atkR+.55&&Math.abs((z.standY||0)-atkStandY)<1.3&&!segBlocked(z.x,z.z,atkX,atkZ);
 }let sp=0,tx=null,tz=null,look=null;const W=z.speed;switch(z.state){case'chase':{const st=stairTarget(z);tx=st?st[0]:z.lastX;tz=st?st[1]:z.lastZ;sp=W;}look=[z.lastX,z.lastZ];break;
 case'alert':z.alertT-=dt;look=[z.lastX,z.lastZ];if(z.alertT<=0){if(z.aware>=1)enterChase(z);else{z.state='investigate';z.tx=z.lastX;z.tz=z.lastZ;z.stT=9;}}break;case'investigate':tx=z.tx;tz=z.tz;sp=W*.5;z.stT-=dt;look=[tx,tz];
 if(Math.hypot(tx-z.x,tz-z.z)<1.3||z.stT<=0){z.state='idle';z.idleT=rand(2,4);}break;case'idle':z.idleT-=dt;if(z.idleT<=0)pickBehavior(z);break;case'wander':z.wT-=dt;sp=W*.25;tx=z.x+Math.sin(z.wa)*5;tz=z.z+Math.cos(z.wa)*5;if(z.wT<=0){z.state='idle';z.idleT=rand(1,3.5);}break;
@@ -764,7 +768,7 @@ case'patrol':tx=z.tx;tz=z.tz;sp=W*.4;z.stT-=dt;if(Math.hypot(tx-z.x,tz-z.z)<1.5|
 look=[t.x,t.z];if(z.sniffT===undefined){z.stT-=dt;const dd=Math.hypot(t.x-z.x,t.z-z.z);if(dd<z.r+1.2)z.sniffT=rand(2.2,3.8);else if(z.stT<=0){z.state='idle';z.idleT=2;}else{tx=t.x;tz=t.z;sp=W*.33;}}
 else{z.sniffT-=dt;if(z.sniffT<=0){z.sniffT=undefined;if(Math.random()<.5){z.state='bash';z.bashType='door';z.bashCd=0;z.bashHits=Math.floor(rand(2,5));}else{z.state='idle';z.idleT=rand(1.5,3);}}}
 break;}case'seek':if(z.bashTarget){tx=z.bashTarget.x;tz=z.bashTarget.z;sp=W*.9;look=[tx,tz];}else z.state='chase';break;case'bash':if(z.bashTarget)look=[z.bashTarget.x,z.bashTarget.z];break;
-}if(inRange&&z.attackCd<=0){player.hp-=rand(8,15)*playerDamageMultiplier()*T.dm*(driving?.55:1);z.attackCd=rand(.9,1.2);z.attackAnimT=1.0;flashHurt();showMsg(driving?'¡Los zombies golpean el auto!':'¡El zombie te golpeó!');
+}if(inRange&&z.attackCd<=0){if(atkLocal){player.hp-=rand(8,15)*playerDamageMultiplier()*T.dm*(driving?.55:1);flashHurt();showMsg(driving?'¡Los zombies golpean el auto!':'¡El zombie te golpeó!');}else if(window.MPNet&&MPNet.sendZombieDamageToPlayer){MPNet.sendZombieDamageToPlayer(atkTargetId,rand(8,15)*T.dm);}z.attackCd=rand(.9,1.2);z.attackAnimT=1.0;
 }let dvx=0,dvz=0;if(sp>0&&tx!==null){const len=Math.hypot(tx-z.x,tz-z.z)||1;let a=Math.atan2(tx-z.x,tz-z.z);if(z.state==='chase')a+=z.flank*clamp((len-2.5)/9,0,1);if(z.state!=='seek'&&z.state!=='sniff')a=steerAng(z,a);
 const k=inRange?0:len<1.2?len/1.2:1;dvx=Math.sin(a)*sp*k;dvz=Math.cos(a)*sp*k;}for(const o of zombies){if(o===z||!o.alive)continue;const ox=z.x-o.x,oz=z.z-o.z,od=Math.hypot(ox,oz);
 if(od<1.5&&od>.001){const f=(1.5-od)/1.5*1.6;dvx+=ox/od*f;dvz+=oz/od*f;}}const acc=1-Math.exp(-dt*(z.state==='chase'?6:3));z.vx+=(dvx-z.vx)*acc;z.vz+=(dvz-z.vz)*acc;const ox0=z.x,oz0=z.z,nx=z.x+z.vx*dt,nz=z.z+z.vz*dt;
@@ -943,11 +947,11 @@ equip,ITEMS,activeSlotKey:()=>activeSlotKey,
 beginMatch,
 spawnInitialZombies,
 isAlive:()=>player.alive,
-getLocalState:()=>({x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive}),
+getLocalState:()=>{const it=equip[activeSlotKey];const meta=it?ITEMS[it.id]:null;const wKind=meta?(meta.ranged?'ranged':meta.melee?'melee':'item'):'none';return{x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive,jumpY:+((player._jumpY)||0).toFixed(2),wKind,wId:it?it.id:null};},
 getZombieSnapshot:function(){return zombies.filter(z=>!z.remote).map(z=>({id:z.netId,x:+z.x.toFixed(1),z:+z.z.toFixed(1),h:+z.heading.toFixed(2),hp:Math.max(0,Math.round(z.hp)),alive:z.alive,ty:z.t===ZT[1]?1:z.t===ZT[2]?2:0,sc:z.grp.scale.x,mv:Math.hypot(z.vx||0,z.vz||0)>0.3?1:0}));},
 applyZombieSnapshot:function(list){for(const e of list){let z=zombies.find(zz=>zz.netId===e.id);if(!z)z=createRemoteZombie(e.id,e.x,e.z,e.ty,e.sc);if(!z)continue;z.tx=e.x;z.tz=e.z;z.theading=e.h;z.hp=e.hp;z.netMoving=e.mv;if(e.alive===false&&z.alive){z.alive=false;killZombie(z,{x:Math.sin(e.h),z:Math.cos(e.h)});}}},
 applyZombieHit:function(netId,dmg,bleed){const z=zombies.find(zz=>zz.netId===netId&&zz.alive&&!zz.remote);if(!z)return;z.hp-=dmg;z.hitFlash=0.15;if(bleed){z.bleedTimer=bleed.bleedDuration||4;z.bleedDmgPerSec=bleed.bleedDmg;z.bleedTickTimer=0;}if(z.hp<=0)killZombie(z);},
-hostZombieAttackTick:function(dt){if(!window.MPNet)return;for(const z of zombies){if(!z.alive||z.remote)continue;z._remAtkCd=(z._remAtkCd||0)-dt;if(z._remAtkCd>0)continue;for(const[id,rp]of MPNet.remotePlayers){if(!rp.alive)continue;const d=Math.hypot(z.x-rp.x,z.z-rp.z);if(d<z.r+0.9){if(MPNet.sendZombieDamageToPlayer)MPNet.sendZombieDamageToPlayer(id,rand(8,15)*(z.t?z.t.dm:1));z._remAtkCd=1.0;break;}}}},
+
 applyRemoteCarState:function(id,x,z,rot,fuel){const c=cars[id];if(!c||(isDriving&&drivingCar===c))return;c.x=x;c.z=z;c.rotY=rot;c.fuel=fuel;c.grp.position.set(x,0,z);c.grp.rotation.y=rot;c.solidObj.minX=x-1.2;c.solidObj.maxX=x+1.2;c.solidObj.minZ=z-2.2;c.solidObj.maxZ=z+2.2;if(c.crate){const trunkOff=new THREE.Vector3(0,0,-2.4).applyEuler(new THREE.Euler(0,rot,0));c.crate.x=x+trunkOff.x;c.crate.z=z+trunkOff.z;}},
 applyRemoteDoorState:function(id,open,broken,hp){const d=doors[id];if(!d)return;d.hp=hp;if(broken&&!d.broken){d.broken=true;breakDoorVisual(d);}d.open=open;},
 applyRemoteWindowState:function(id,broken,hp){const w=windows[id];if(!w)return;w.hp=hp;if(broken&&!w.broken){w.broken=true;breakWindowVisual(w);}},
@@ -1219,7 +1223,7 @@ function handleMessage(msg,fromPeerId,channel){
       if(!Net.isHost)startLocalMatch();
       break;
     case 'state':
-      updateRemoteAvatar(msg.id,msg.name,msg.x,msg.z,msg.yaw,msg.hp,msg.alive);
+      updateRemoteAvatar(msg.id,msg.name,msg.x,msg.z,msg.yaw,msg.hp,msg.alive,msg.wKind,msg.wId,msg.jumpY);
       if(Net.isHost)relayExcept(msg,fromPeerId);
       break;
     case 'hit':
@@ -1286,8 +1290,18 @@ function ensureAvatar(id,name){
   head.position.y=1.85;grp.add(head);
   const nameSprite=makeNameSprite(name);
   nameSprite.position.y=2.25;grp.add(nameSprite);
+  const handProp=new THREE.Group();handProp.position.set(0.24,-0.06,-0.20);torso.add(handProp);
+  const gunProp=new THREE.Group();
+  const gunBody=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.10,0.30),new THREE.MeshLambertMaterial({color:0x2c2e30}));gunProp.add(gunBody);
+  const gunBarrel=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.16,6),new THREE.MeshLambertMaterial({color:0x14161a}));gunBarrel.rotation.x=Math.PI/2;gunBarrel.position.z=-0.22;gunProp.add(gunBarrel);
+  gunProp.visible=false;handProp.add(gunProp);
+  const meleeProp=new THREE.Group();
+  const meleeHandle=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.5,8),new THREE.MeshLambertMaterial({color:0x5a3d1e}));meleeProp.add(meleeHandle);
+  const meleeBlade=new THREE.Mesh(new THREE.BoxGeometry(0.03,0.16,0.2),new THREE.MeshLambertMaterial({color:0xaaaaaa}));meleeBlade.position.y=0.3;meleeProp.add(meleeBlade);
+  meleeProp.visible=false;handProp.add(meleeProp);
+  const itemProp=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,0.14),new THREE.MeshLambertMaterial({color:0xc9b458}));itemProp.visible=false;handProp.add(itemProp);
   G.scene.add(grp);
-  const rec={grp,torso,head,nameSprite,x:0,z:0,yaw:0,hp:100,alive:true,name,tx:0,tz:0,tyaw:0};
+  const rec={grp,torso,head,nameSprite,handProp,gunProp,meleeProp,itemProp,x:0,z:0,yaw:0,hp:100,alive:true,name,tx:0,tz:0,tyaw:0,jumpY:0,tJumpY:0,wKind:'none'};
   Net.remotePlayers.set(id,rec);
   return rec;
 }
@@ -1301,11 +1315,18 @@ function makeNameSprite(name){
   const spr=new THREE.Sprite(mat);spr.scale.set(1.6,0.4,1);
   return spr;
 }
-function updateRemoteAvatar(id,name,x,z,yaw,hp,alive){
+function updateRemoteAvatar(id,name,x,z,yaw,hp,alive,wKind,wId,jumpY){
   if(id===Net.myId)return;
   const rec=ensureAvatar(id,name);
   if(!rec)return;
   rec.tx=x;rec.tz=z;rec.tyaw=yaw;rec.hp=hp;rec.alive=alive;rec.name=name;
+  rec.tJumpY=jumpY||0;
+  if(wKind&&wKind!==rec.wKind){
+    rec.wKind=wKind;
+    rec.gunProp.visible=wKind==='ranged';
+    rec.meleeProp.visible=wKind==='melee';
+    rec.itemProp.visible=wKind==='item';
+  }
   rec.grp.visible=alive;
 }
 function removeRemoteAvatar(id){
@@ -1327,7 +1348,8 @@ window.__netTick=function(dt){
     rec.z+=(rec.tz-rec.z)*Math.min(1,dt*10);
     let dyaw=rec.tyaw-rec.yaw;while(dyaw>Math.PI)dyaw-=Math.PI*2;while(dyaw<-Math.PI)dyaw+=Math.PI*2;
     rec.yaw+=dyaw*Math.min(1,dt*10);
-    rec.grp.position.set(rec.x,0,rec.z);
+    rec.jumpY+=((rec.tJumpY||0)-rec.jumpY)*Math.min(1,dt*15);
+    rec.grp.position.set(rec.x,rec.jumpY,rec.z);
     rec.grp.rotation.y=rec.yaw;
   }
   // 2) Enviar nuestro propio estado ~15 veces por segundo
@@ -1335,7 +1357,7 @@ window.__netTick=function(dt){
   if(lastStateSend>1/15){
     lastStateSend=0;
     const s=G.getLocalState();
-    send({t:'state',id:Net.myId,name:Net.myName,x:s.x,z:s.z,yaw:s.yaw,hp:s.hp,alive:s.alive});
+    send({t:'state',id:Net.myId,name:Net.myName,x:s.x,z:s.z,yaw:s.yaw,hp:s.hp,alive:s.alive,wKind:s.wKind,wId:s.wId,jumpY:s.jumpY});
     if(s.alive===false)reportOwnDeath();
   }
   // 3) Detección de impactos de bala contra jugadores remotos
@@ -1361,7 +1383,6 @@ window.__netTick=function(dt){
       lastZombieSend=0;
       send({t:'zombies',list:G.getZombieSnapshot()});
     }
-    if(G.hostZombieAttackTick)G.hostZombieAttackTick(dt);
   }
 };
 let lastZombieSend=0;
