@@ -389,19 +389,49 @@ function _fbxFindBones(inst){
   const bones={
     upL:B('UpperLeg_L'),upR:B('UpperLeg_R'),loL:B('LowerLeg_L'),loR:B('LowerLeg_R'),
     shL:B('Shoulder_L')||B('Clavicle_L'),shR:B('Shoulder_R')||B('Clavicle_R'),
-    elL:B('Elbow_L'),elR:B('Elbow_R'),head:B('Head'),spine:B('Spine_01')
+    elL:B('Elbow_L'),elR:B('Elbow_R'),head:B('Head'),spine:B('Spine_01'),
+    handL:B('Hand_L'),handR:B('Hand_R')
   };
   const baseX={},baseY={};
   for(const k in bones){if(bones[k]){baseX[k]=bones[k].rotation.x;baseY[k]=bones[k].rotation.y;}}
   return{bones,baseX,baseY};
+}
+// El bind pose del FBX es una T-pose (brazos extendidos a los costados). Aquí se bajan
+// los brazos a una postura de reposo natural para que ningún personaje (jugador, zombie,
+// o vista previa de menú/inventario) se quede en T-pose.
+function _fbxApplyRestPose(bones){
+  if(bones.shL)bones.shL.rotation.z-=1.5;
+  if(bones.shR)bones.shR.rotation.z-=1.5;
+  if(bones.elL)bones.elL.rotation.x+=0.35;
+  if(bones.elR)bones.elR.rotation.x+=0.35;
 }
 function spawnCharVisual(material){
   if(!charTemplateReady)return null;
   const inst=charTemplate.clone(true);
   inst.traverse(o=>{if(o.isMesh){o.material=material;}});
   const rig=_fbxFindBones(inst);
+  _fbxApplyRestPose(rig.bones);
   inst.userData.bones=rig.bones;inst.userData.baseX=rig.baseX;inst.userData.baseY=rig.baseY;
   return inst;
+}
+// Ciclo de caminata reutilizable para cualquier instancia FBX (jugadores remotos, zombies,
+// y las vistas previas de menú/inventario que antes quedaban estáticas en T-pose).
+function animateFbxWalk(B,X,phase,amp){
+  const swing=Math.sin(phase)*0.5*amp,swingLeg=Math.sin(phase)*0.55*amp;
+  if(B.upL)B.upL.rotation.x=(X.upL||0)+swingLeg;
+  if(B.upR)B.upR.rotation.x=(X.upR||0)-swingLeg;
+  if(B.loL)B.loL.rotation.x=(X.loL||0)+Math.max(0,-Math.sin(phase))*0.75*amp;
+  if(B.loR)B.loR.rotation.x=(X.loR||0)+Math.max(0,Math.sin(phase))*0.75*amp;
+  if(B.shL)B.shL.rotation.x=(X.shL||0)-swing*0.8;
+  if(B.shR)B.shR.rotation.x=(X.shR||0)+swing*0.8;
+}
+// Postura de apuntado con arma de fuego: el brazo derecho (mano con la pistola) se levanta
+// al frente y el izquierdo acompaña como apoyo de dos manos.
+function animateFbxAim(B,X,aimAmt){
+  if(B.shR)B.shR.rotation.x=(X.shR||0)+0.95*aimAmt;
+  if(B.elR)B.elR.rotation.x=(B.elR.rotation.x||0)+0.35*aimAmt;
+  if(B.shL)B.shL.rotation.x=(X.shL||0)+0.55*aimAmt;
+  if(B.elL)B.elL.rotation.x=(B.elL.rotation.x||0)+0.55*aimAmt;
 }
 function syncFbxZombie(z){
   const inst=z.fbxInst;if(!inst)return;
@@ -691,7 +721,7 @@ const backpackMat=new THREE.MeshLambertMaterial({color:0x6b4a2e});const backpack
 const bpBody=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.38,0.18),backpackMat);backpackMesh.add(bpBody);const bpTop=new THREE.Mesh(new THREE.BoxGeometry(0.26,0.12,0.16),backpackMat);bpTop.position.set(0,0.24,0);backpackMesh.add(bpTop);
 const bpPocket=new THREE.Mesh(new THREE.BoxGeometry(0.20,0.16,0.06),backpackMat);bpPocket.position.set(0,-0.06,0.12);backpackMesh.add(bpPocket);const bpStrapL=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.4,0.05),backpackStrapMat);bpStrapL.position.set(-0.12,0.02,-0.13);backpackMesh.add(bpStrapL);
 const bpStrapR=bpStrapL.clone();bpStrapR.position.x=0.12;backpackMesh.add(bpStrapR);backpackMesh.position.set(0,1.42,0.15);backpackMesh.visible=false;playerBodyGroup.add(backpackMesh);
-function updateBackpackVisual(){backpackMesh.visible= !!equip.backpack;}const DEFAULT_TORSO_COLOR=0x46543a,DEFAULT_LEG_COLOR=0x3d4a34;const SHIRT_COLORS={shirt_basic:0x3f6591};
+function updateBackpackVisual(){backpackMesh.visible= !!equip.backpack;}const DEFAULT_TORSO_COLOR=0xf0efe9,DEFAULT_LEG_COLOR=0xe8e6df;const SHIRT_COLORS={shirt_basic:0x3f6591};
 const PANTS_COLORS={pants_basic:0x5a4a30};function buildVestMesh(){const g=new THREE.Group();const vestMat=new THREE.MeshLambertMaterial({color:0x2f3a22});const plate=new THREE.Mesh(new THREE.BoxGeometry(0.46,0.36,0.30),vestMat);plate.position.set(0,1.37,-0.01);g.add(plate);
 const strapMat=new THREE.MeshLambertMaterial({color:0x1c2416});const strapL=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.44,0.05),strapMat);strapL.position.set(-0.17,1.56,-0.02);g.add(strapL);
 const strapR=strapL.clone();strapR.position.x=0.17;g.add(strapR);const pouch=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.10,0.06),strapMat);pouch.position.set(0,1.28,-0.16);g.add(pouch);
@@ -704,7 +734,7 @@ charCam.position.set(0,1.32,2.65);charCam.lookAt(0,1.12,0);charScene.add(new THR
 const charMannequin=new THREE.Group();charScene.add(charMannequin);const cLegL=buildPlayerLeg(-1),cLegR=buildPlayerLeg(1);charMannequin.add(cLegL,cLegR);const cHips=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.12,0.22),legClothMat);cHips.position.set(0,1.05,-0.1);charMannequin.add(cHips);
 const cTorso=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.5,0.26),torsoMatP);cTorso.position.set(0,1.35,-0.02);charMannequin.add(cTorso);const cArmL=buildPlayerArm(true);cArmL.position.set(-0.26,1.52,-0.02);cArmL.rotation.x=0.2;charMannequin.add(cArmL);
 const cArmR=buildPlayerArm(false);cArmR.position.set(0.26,1.52,-0.02);cArmR.rotation.x=0.05;charMannequin.add(cArmR);const cHead=new THREE.Mesh(new THREE.BoxGeometry(0.28,0.28,0.28),armSkinMat);cHead.position.set(0,1.72,-0.02);charMannequin.add(cHead);
-[cLegL,cLegR,cHips,cTorso,cArmL,cArmR,cHead].forEach(o=>{if(o.isMesh)o.visible=false;else o.traverse(m=>{if(m.isMesh)m.visible=false;});});const cFbx=spawnCharVisual(torsoMatP);if(cFbx)charMannequin.add(cFbx);
+[cLegL,cLegR,cHips,cTorso,cArmL,cArmR,cHead].forEach(o=>{if(o.isMesh)o.visible=false;else o.traverse(m=>{if(m.isMesh)m.visible=false;});});const cFbx=spawnCharVisual(torsoMatP);if(cFbx)charMannequin.add(cFbx);let invPreviewT=0;
 const cCap=new THREE.Mesh(new THREE.BoxGeometry(0.30,0.10,0.30),new THREE.MeshLambertMaterial({color:0x2a2a26}));cCap.position.set(0,1.865,-0.02);cCap.visible=false;charMannequin.add(cCap);
 const cCapBrim=new THREE.Mesh(new THREE.BoxGeometry(0.30,0.05,0.10),new THREE.MeshLambertMaterial({color:0x2a2a26}));cCapBrim.position.set(0,1.84,-0.18);cCapBrim.visible=false;charMannequin.add(cCapBrim);
 const cBackpack=backpackMesh.clone(true);cBackpack.position.set(0,1.42,0.15);cBackpack.visible=false;charMannequin.add(cBackpack);const cVest=buildVestMesh();cVest.visible=false;charMannequin.add(cVest);
@@ -739,7 +769,9 @@ lAxe.position.set(0.30,1.15,0.05);lAxe.rotation.set(0.35,0,0.55);lobbyMannequin.
 lobbyMannequin.rotation.y=-0.5;
 lobbyRenderer=new THREE.WebGLRenderer({canvas:lobbyCanvas,antialias:true,alpha:true});lobbyRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
 resizeLobbyRenderer();window.addEventListener('resize',resizeLobbyRenderer);}
-function renderLobbyPreview(dt){if(!lobbyRenderer)return;lobbyT+=dt;lobbyMannequin.rotation.y=-0.5+Math.sin(lobbyT*0.32)*0.55;lobbyMannequin.position.y=Math.sin(lobbyT*1.05)*0.018;lobbyRenderer.render(lobbyScene,lobbyCam);}
+function renderLobbyPreview(dt){if(!lobbyRenderer)return;lobbyT+=dt;lobbyMannequin.rotation.y=-0.5+Math.sin(lobbyT*0.32)*0.55;lobbyMannequin.position.y=Math.sin(lobbyT*1.05)*0.018;
+if(lFbx&&lFbx.userData.bones)animateFbxWalk(lFbx.userData.bones,lFbx.userData.baseX,lobbyT*2.4,0.55);
+lobbyRenderer.render(lobbyScene,lobbyCam);}
 function updateCharacterPreview(){cBackpack.visible= !!equip.backpack;updateEquippedAppearance();const shown=equip.primary||equip.secondary;buildHandItemMesh(shown?shown.id:null);
 if(charRenderer)charRenderer.render(charScene,charCam);}const useMesh=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.12,0.12),new THREE.MeshLambertMaterial({color:0xffcf6b}));
 useMesh.position.set(0.2,-0.3,-0.45);useMesh.visible=false;camera.add(useMesh);let weaponKick=0;let reloading=false,reloadT=0,reloadDuration=1;let useAction=null;let isAiming=false;
@@ -1003,7 +1035,7 @@ document.getElementById('stBar').style.width=player.stamina+'%';document.getElem
 function die(){player.alive=false;document.getElementById('deathStats').textContent='Has caído en combate.';document.getElementById('deathScreen').style.display='flex';document.exitPointerLock();
 }document.getElementById('respawnBtn').onclick=()=>{player.alive=true;player.bleed=false;player.falling=false;player.vault=null;player.hp=100;player.hunger=85;player.thirst=85;player.stamina=100;
 player.x=SPAWN.x;player.z=SPAWN.z;player.safeOK=false;player._jumpY=0;player.vy=0;player.onGround=true;isDriving=false;drivingCar=null;document.getElementById('deathScreen').style.display='none';
-};function loop(now){if(tabHidden){requestAnimationFrame(loop);return;}const dt=Math.min(0.05,(now-last)/1000);last=now;if(gameStarted){update(dt);renderer.render(scene,camera);}else{renderLobbyPreview(dt);}if(anyPanelOpen()&&charRenderer){charMannequin.rotation.y+=dt*0.5;charRenderer.render(charScene,charCam);}
+};function loop(now){if(tabHidden){requestAnimationFrame(loop);return;}const dt=Math.min(0.05,(now-last)/1000);last=now;if(gameStarted){update(dt);renderer.render(scene,camera);}else{renderLobbyPreview(dt);}if(anyPanelOpen()&&charRenderer){charMannequin.rotation.y+=dt*0.5;invPreviewT+=dt;if(cFbx&&cFbx.userData.bones)animateFbxWalk(cFbx.userData.bones,cFbx.userData.baseX,invPreviewT*2.4,0.55);charRenderer.render(charScene,charCam);}
 requestAnimationFrame(loop);}document.getElementById('keysToggle').onclick=()=>{document.getElementById('keysPanel').classList.toggle('show');};requestAnimationFrame(loop);let deferredInstallPrompt=null;window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();deferredInstallPrompt=e;const ib=document.getElementById('installBtn');if(ib)ib.style.display='inline-block';});
 const installBtnEl=document.getElementById('installBtn');if(installBtnEl){if(window.matchMedia('(display-mode: standalone)').matches)installBtnEl.style.display='none';installBtnEl.onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;installBtnEl.style.display='none';}else{showMsg('En iOS: usa Compartir ▸ Añadir a pantalla de inicio');}};}
 function requestGameFullscreen(){const el=document.documentElement;const req=el.requestFullscreen||el.webkitRequestFullscreen||el.mozRequestFullScreen||el.msRequestFullscreen;if(req){try{req.call(el).catch(()=>{});}catch(e){}}if(screen.orientation&&screen.orientation.lock){try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}}}
@@ -1016,7 +1048,7 @@ document.getElementById('startBtn').onclick=function(){
 /* ===== Puente para el módulo de red multijugador (window.MPNet) ===== */
 window.__game={
 THREE,scene,camera,SPAWN,bullets,player,
-spawnCharVisual,charTemplateReady:()=>charTemplateReady,
+spawnCharVisual,charTemplateReady:()=>charTemplateReady,animateFbxWalk,animateFbxAim,
 showMsg,flashHurt,spawnBloodImpact,showHitMarker,
 equip,ITEMS,activeSlotKey:()=>activeSlotKey,
 beginMatch,
@@ -1357,8 +1389,11 @@ function ensureAvatar(id,name){
   const G=window.__game;if(!G)return null;
   const THREE=G.THREE;
   const grp=new THREE.Group();
+  // Los jugadores (a diferencia de los zombies) siempre se ven blancos, con una leve
+  // variación de tono por jugador para poder distinguirlos entre sí.
   const hue=(Math.abs(hashStr(id))%360)/360;
-  const col=new THREE.Color().setHSL(hue,0.55,0.45);
+  const light=0.88+(Math.abs(hashStr(id))%10)/100;
+  const col=new THREE.Color().setHSL(hue,0.06,light);
   const torso=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.62,0.28),new THREE.MeshLambertMaterial({color:col}));
   torso.position.y=1.35;grp.add(torso);
   const head=new THREE.Mesh(new THREE.BoxGeometry(0.30,0.30,0.30),new THREE.MeshLambertMaterial({color:0xd8b48c}));
@@ -1370,7 +1405,13 @@ function ensureAvatar(id,name){
     fbxInst=G.spawnCharVisual(torso.material);
     if(fbxInst){grp.add(fbxInst);torso.visible=false;head.visible=false;}
   }
-  const handProp=new THREE.Group();handProp.position.set(0.24,-0.06,-0.20);torso.add(handProp);
+  // Si el modelo FBX cargó, el objeto que sostiene el arma se cuelga de la mano derecha
+  // animada (con una rotación correctora) para que el arma se mueva con el brazo en vez
+  // de quedar flotando en un punto fijo del torso.
+  const fbxHandR=fbxInst&&fbxInst.userData.bones&&fbxInst.userData.bones.handR;
+  const handProp=new THREE.Group();
+  if(fbxHandR){handProp.rotation.set(-0.339,0.037,-1.634);fbxHandR.add(handProp);}
+  else{handProp.position.set(0.24,-0.06,-0.20);torso.add(handProp);}
   const gunProp=new THREE.Group();
   const gunBody=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.10,0.30),new THREE.MeshLambertMaterial({color:0x2c2e30}));gunProp.add(gunBody);
   const gunBarrel=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.16,6),new THREE.MeshLambertMaterial({color:0x14161a}));gunBarrel.rotation.x=Math.PI/2;gunBarrel.position.z=-0.22;gunProp.add(gunBarrel);
@@ -1437,11 +1478,9 @@ window.__netTick=function(dt){
       const amp=Math.min(1,spd/3);
       rec.walkPhase=(rec.walkPhase||0)+dt*Math.min(spd,6)*1.8;
       const B=rec.fbxInst.userData.bones,X=rec.fbxInst.userData.baseX;
-      const swing=Math.sin(rec.walkPhase)*0.5*amp;
-      if(B.upL)B.upL.rotation.x=(X.upL||0)+swing;
-      if(B.upR)B.upR.rotation.x=(X.upR||0)-swing;
-      if(B.shL)B.shL.rotation.x=(X.shL||0)-swing*0.8;
-      if(B.shR)B.shR.rotation.x=(X.shR||0)+swing*0.8;
+      const isRanged=rec.wKind==='ranged';
+      G.animateFbxWalk(B,X,rec.walkPhase,isRanged?amp*0.35:amp);
+      if(isRanged)G.animateFbxAim(B,X,1);
     }
   }
   // 2) Enviar nuestro propio estado ~15 veces por segundo
