@@ -322,6 +322,11 @@ function ensureAvatar(id,name){
   if(G.spawnCharVisual&&G.charTemplateReady&&G.charTemplateReady()){
     fbxInst=G.spawnCharVisual(torso.material);
     if(fbxInst){grp.add(fbxInst);torso.visible=false;head.visible=false;}
+  }else{
+    console.warn('[Avatar remoto] No se creó el modelo FBX para "'+name+'" (charTemplateReady='+ (G.charTemplateReady&&G.charTemplateReady()) +'). Se usa el cuerpo de bloques de respaldo.');
+  }
+  if(fbxInst&&!fbxInst.userData.bones){
+    console.error('[Avatar remoto] El modelo FBX de "'+name+'" no tiene huesos mapeados (userData.bones vacío): no podrá animarse.');
   }
   // Si el modelo FBX cargó, el objeto que sostiene el arma se cuelga de la mano derecha
   // animada (con una rotación correctora) para que el arma se mueva con el brazo en vez
