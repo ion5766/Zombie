@@ -248,18 +248,12 @@ function handleMessage(msg,fromPeerId,channel){
       if(!Net.isHost)startLocalMatch();
       break;
     case 'state':
-      updateRemoteAvatar(msg.id,msg.name,msg.x,msg.z,msg.yaw,msg.hp,msg.alive,msg.wKind,msg.wId,msg.jumpY,msg.crouch,msg.aim,msg.air);
+      updateRemoteAvatar(msg.id,msg.name,msg.x,msg.z,msg.yaw,msg.hp,msg.alive,msg.wKind,msg.wId,msg.jumpY);
       if(Net.isHost)relayExcept(msg,fromPeerId);
-      break;
-    case 'anim':
-      triggerRemoteAnim(msg.id,msg.kind);
-      if(Net.isHost&&fromPeerId!==undefined)relayExcept(msg,fromPeerId);
       break;
     case 'hit':
       if(msg.targetId===Net.myId&&window.__game){
         window.__game.applyRemoteDamageToLocal(msg.dmg,msg.sourceName);
-      }else{
-        triggerRemoteHitFlash(msg.targetId);
       }
       if(Net.isHost&&fromPeerId!==undefined)relayExcept(msg,fromPeerId);
       break;
@@ -346,8 +340,7 @@ function ensureAvatar(id,name){
   meleeProp.visible=false;handProp.add(meleeProp);
   const itemProp=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,0.14),new THREE.MeshLambertMaterial({color:0xc9b458}));itemProp.visible=false;handProp.add(itemProp);
   G.scene.add(grp);
-  const rec={grp,torso,head,nameSprite,handProp,gunProp,meleeProp,itemProp,fbxInst,walkPhase:0,x:0,z:0,yaw:0,hp:100,alive:true,name,tx:0,tz:0,tyaw:0,jumpY:0,tJumpY:0,wKind:'none',
-    crouch:0,tCrouch:0,aim:0,tAim:0,air:0,tAir:0,atkKind:null,atkT:0,hitT:0};
+  const rec={grp,torso,head,nameSprite,handProp,gunProp,meleeProp,itemProp,fbxInst,x:0,z:0,yaw:0,hp:100,alive:true,name,tx:0,tz:0,tyaw:0,jumpY:0,tJumpY:0,wKind:'none'};
   Net.remotePlayers.set(id,rec);
   return rec;
 }
@@ -361,13 +354,12 @@ function makeNameSprite(name){
   const spr=new THREE.Sprite(mat);spr.scale.set(1.6,0.4,1);
   return spr;
 }
-function updateRemoteAvatar(id,name,x,z,yaw,hp,alive,wKind,wId,jumpY,crouch,aim,air){
+function updateRemoteAvatar(id,name,x,z,yaw,hp,alive,wKind,wId,jumpY){
   if(id===Net.myId)return;
   const rec=ensureAvatar(id,name);
   if(!rec)return;
   rec.tx=x;rec.tz=z;rec.tyaw=yaw;rec.hp=hp;rec.alive=alive;rec.name=name;
   rec.tJumpY=jumpY||0;
-  rec.tCrouch=crouch||0;rec.tAim=aim||0;rec.tAir=air||0;
   if(wKind&&wKind!==rec.wKind){
     rec.wKind=wKind;
     rec.gunProp.visible=wKind==='ranged';
@@ -375,20 +367,6 @@ function updateRemoteAvatar(id,name,x,z,yaw,hp,alive,wKind,wId,jumpY,crouch,aim,
     rec.itemProp.visible=wKind==='item';
   }
   rec.grp.visible=alive;
-}
-// Dispara una animación puntual (ataque) sobre el avatar remoto correspondiente.
-function triggerRemoteAnim(id,kind){
-  if(id===Net.myId)return;
-  const rec=Net.remotePlayers.get(id);
-  if(!rec)return;
-  rec.atkKind=kind;rec.atkT=1;
-}
-// Marca la reacción de "golpe recibido" sobre el avatar remoto que recibió el impacto.
-function triggerRemoteHitFlash(targetId){
-  if(targetId===Net.myId)return;
-  const rec=Net.remotePlayers.get(targetId);
-  if(!rec)return;
-  rec.hitT=1;
 }
 function removeRemoteAvatar(id){
   const rec=Net.remotePlayers.get(id);
@@ -413,33 +391,19 @@ window.__netTick=function(dt){
     rec.jumpY+=((rec.tJumpY||0)-rec.jumpY)*Math.min(1,dt*15);
     rec.grp.position.set(rec.x,rec.jumpY,rec.z);
     rec.grp.rotation.y=rec.yaw;
-    // Suaviza los estados booleanos (agachado/apuntando/en el aire) que llegan por red.
-    rec.crouch+=((rec.tCrouch||0)-rec.crouch)*Math.min(1,dt*8);
-    rec.aim+=((rec.tAim||0)-rec.aim)*Math.min(1,dt*10);
-    rec.air+=((rec.tAir||0)-rec.air)*Math.min(1,dt*12);
-    // Los golpes (ataques y recibir daño) son eventos puntuales ('anim'/'hit'), no van en
-    // el 'state' de cada frame: aquí solo se hace decaer el pulso ya disparado.
-    if(rec.atkT>0){
-      const rate=rec.atkKind==='meleeHeavy'?1.8:rec.atkKind==='meleeLight'?2.8:rec.atkKind==='punchL'?4.5:3.5;
-      rec.atkT=Math.max(0,rec.atkT-dt*rate);
-      if(rec.atkT<=0)rec.atkKind=null;
-    }
-    if(rec.hitT>0)rec.hitT=Math.max(0,rec.hitT-dt*2.6);
     if(rec.fbxInst){
+      // La velocidad real del jugador remoto controla la velocidad de reproducción de
+      // la animación de caminata (Walking.fbx) en vez de un ciclo falso a base de senos.
       const spd=Math.hypot(rec.x-_prevX,rec.z-_prevZ)/Math.max(dt,0.0001);
-      const amp=Math.min(1,spd/3);
-      rec.walkPhase=(rec.walkPhase||0)+dt*Math.min(spd,6)*1.8;
-      const weapon=rec.wKind==='ranged'?'ranged':rec.wKind==='melee'?'melee':'none';
-      if(G.animateFbxCharacter){
-        G.animateFbxCharacter(rec.fbxInst,{
-          phase:rec.walkPhase,moveAmp:amp,crouch:rec.crouch,air:rec.air,
-          weapon,aim:rec.aim,atkKind:rec.atkKind,atkT:rec.atkT,hitT:rec.hitT
-        });
-      }else{
-        // Respaldo por si se cargó una versión antigua de game-core.js sin animateFbxCharacter.
+      const mixer=rec.fbxInst.userData.mixer;
+      if(mixer){
+        mixer.timeScale=spd>0.05?Math.min(2.2,0.55+spd*0.38):0;
+        mixer.update(dt);
+      }
+      const isRanged=rec.wKind==='ranged';
+      if(isRanged){
         const B=rec.fbxInst.userData.bones,X=rec.fbxInst.userData.baseX;
-        G.animateFbxWalk(B,X,rec.walkPhase,weapon==='ranged'?amp*0.35:amp);
-        if(weapon==='ranged')G.animateFbxAim(B,X,1);
+        G.animateFbxAim(B,X,1);
       }
     }
   }
@@ -448,7 +412,7 @@ window.__netTick=function(dt){
   if(lastStateSend>1/15){
     lastStateSend=0;
     const s=G.getLocalState();
-    send({t:'state',id:Net.myId,name:Net.myName,x:s.x,z:s.z,yaw:s.yaw,hp:s.hp,alive:s.alive,wKind:s.wKind,wId:s.wId,jumpY:s.jumpY,crouch:s.crouch,aim:s.aim,air:s.air});
+    send({t:'state',id:Net.myId,name:Net.myName,x:s.x,z:s.z,yaw:s.yaw,hp:s.hp,alive:s.alive,wKind:s.wKind,wId:s.wId,jumpY:s.jumpY});
     if(s.alive===false)reportOwnDeath();
   }
   // 3) Detección de impactos de bala contra jugadores remotos
@@ -490,12 +454,6 @@ function reportOwnDeath(){
 window.__onLocalAttack=function(isRightClick){
   if(!Net.active)return;
   const G=window.__game;if(!G||!G.isAlive())return;
-  // Avisa a los demás jugadores qué animación de ataque reproducir sobre nuestro avatar
-  // (golpe de hacha ligero/fuerte o puñetazo). Es un evento puntual, no parte del 'state'.
-  if(G.getLocalAttackState){
-    const atk=G.getLocalAttackState();
-    if(atk.kind)send({t:'anim',id:Net.myId,kind:atk.kind});
-  }
   // Ataque cuerpo a cuerpo simplificado contra jugadores remotos cercanos
   const local=G.getLocalState();
   const item=G.equip[G.activeSlotKey()];
