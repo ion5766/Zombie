@@ -16,6 +16,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -407,7 +408,10 @@ function _fbxApplyRestPose(bones){
 }
 function spawnCharVisual(material){
   if(!charTemplateReady)return null;
-  const inst=charTemplate.clone(true);
+  // Object3D.clone(true) NO reconstruye el Skeleton de un SkinnedMesh: todas las copias
+  // seguirían compartiendo el mismo esqueleto del original (por eso ninguna rotación de
+  // hueso se veía). THREE.SkeletonUtils.clone sí crea un esqueleto propio por instancia.
+  const inst=(THREE.SkeletonUtils&&THREE.SkeletonUtils.clone)?THREE.SkeletonUtils.clone(charTemplate):charTemplate.clone(true);
   inst.traverse(o=>{if(o.isMesh){o.material=material;}});
   const rig=_fbxFindBones(inst);
   _fbxApplyRestPose(rig.bones);
