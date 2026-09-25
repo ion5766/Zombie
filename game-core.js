@@ -32,6 +32,17 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
     const buf=_fbxBase64ToBuffer(FBX_XBOT_B64);
     const loader=new THREE.FBXLoader();
     const obj=loader.parse(buf,'');
+    // X_Bot.fbx trae 2 mallas (el cuerpo y una malla extra de "esferas" en las
+    // articulaciones) y CADA UNA arrastra su propia jerarquía de huesos, anidada una
+    // dentro de la otra pero con los MISMOS nombres (p.ej. dos huesos "mixamorigHips").
+    // Si se deja así, el AnimationMixer/PropertyBinding puede terminar animando el hueso
+    // duplicado equivocado (el que no controla la malla visible) y el personaje se queda
+    // congelado en la T-pose aunque la animación esté "reproduciéndose". Renombramos los
+    // huesos duplicados para que la búsqueda por nombre sea inequívoca.
+    (function dedupBoneNames(root){
+      const seen=new Set();
+      root.traverse(o=>{if(o.isBone){if(seen.has(o.name))o.name=o.name+'__dup';else seen.add(o.name);}});
+    })(obj);
     // Normaliza escala/orientacion sea cual sea la unidad de exportacion del FBX
     obj.updateMatrixWorld(true);
     let box=new THREE.Box3().setFromObject(obj);
