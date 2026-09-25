@@ -1063,6 +1063,7 @@ function hostConnectToPeer(pid,name,peersCol){
   wireChannel(channel,pid,name);
   pc.onicecandidate=e=>{if(e.candidate){peersCol.doc(pid).update({offerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});}};
   pc.oniceconnectionstatechange=()=>{
+    console.log('[MPNet] iceConnectionState (host, peer '+pid+'):',pc.iceConnectionState);
     if(pc.iceConnectionState==='failed'||pc.iceConnectionState==='closed'){handlePeerLeft(pid);}
   };
   pc.createOffer().then(offer=>pc.setLocalDescription(offer)).then(()=>{
@@ -1110,6 +1111,10 @@ async function joinRoom(code,name){
   Net.hostPC=pc;
   pc.ondatachannel=e=>{Net.hostChannel=e.channel;wireChannel(e.channel,'HOST_'+code,roomSnap.data().hostName||'Host',true);};
   pc.onicecandidate=e=>{if(e.candidate){peerRef.update({answerCandidates:firebase.firestore.FieldValue.arrayUnion(e.candidate.toJSON())}).catch(()=>{});}};
+  pc.oniceconnectionstatechange=()=>{
+    console.log('[MPNet] iceConnectionState (cliente):',pc.iceConnectionState);
+    if(Net.onIceStateChange)Net.onIceStateChange(pc.iceConnectionState);
+  };
   await peerRef.set({name:Net.myName,joinedAt:Date.now(),offerCandidates:[],answerCandidates:[]});
   let processedOfferIce=0;
   const unsub=peerRef.onSnapshot(async doc=>{
@@ -1140,6 +1145,7 @@ function wireChannel(channel,peerId,name,isHostChannel){
       if(Net.onRosterChange)Net.onRosterChange();
     }else{
       send({t:'hello',id:Net.myId,name:Net.myName});
+      if(isHostChannel&&Net.onConnectedToHost)Net.onConnectedToHost();
     }
   };
   channel.onclose=()=>{if(Net.isHost)handlePeerLeft(peerId);};
@@ -1415,10 +1421,24 @@ function wireLobbyUI(){
     const name=$('mpPlayerName').value.trim()||'Jugador';
     const code=$('mpJoinCode').value.trim();
     if(!code){$('mpJoinStatus').textContent='Escribe un código de sala.';return;}
-    $('mpJoinStatus').textContent='Conectando…';
+    $('mpJoinStatus').textContent='Buscando la sala…';
+    $('mpJoinConnectBtn').disabled=true;
+    let gotDataChannel=false;
     try{
       await joinRoom(code,name);
-      $('mpJoinStatus').textContent='Conectado. Esperando a que el host inicie la partida…';
+      $('mpJoinStatus').textContent='Sala encontrada. Estableciendo conexión con el host…';
+      Net.onConnectedToHost=()=>{
+        gotDataChannel=true;
+        $('mpJoinStatus').textContent='✅ Conectado al host. Esperando a que inicie la partida…';
+      };
+      Net.onIceStateChange=(state)=>{
+        if(gotDataChannel)return;
+        if(state==='checking')$('mpJoinStatus').textContent='Sala encontrada. Estableciendo conexión con el host…';
+        else if(state==='failed'||state==='disconnected')$('mpJoinStatus').textContent='❌ No se pudo conectar con el host. Prueba estar en la misma red WiFi, o revisa que ambos tengan buena conexión a internet (algunas redes con firewall estricto bloquean la conexión directa).';
+      };
+      setTimeout(()=>{
+        if(!gotDataChannel)$('mpJoinStatus').textContent='⏳ Tardando más de lo normal en conectar… si no conecta en unos segundos más, prueba con ambos en la misma red WiFi.';
+      },12000);
       Net.onRosterChange=()=>{
         const list=$('mpJoinPlayerList');list.innerHTML='';
         for(const [id,v] of Net.roster){
@@ -1429,6 +1449,8 @@ function wireLobbyUI(){
       };
     }catch(e){
       $('mpJoinStatus').textContent='Error: '+e.message;
+    }finally{
+      $('mpJoinConnectBtn').disabled=false;
     }
   };
 }
