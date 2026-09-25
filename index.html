@@ -251,7 +251,7 @@ background:radial-gradient(ellipse 900px 720px at 66% 58%,rgba(140,196,80,.16),t
 <button id="itemMenuDrop" class="itemMenuBtn drop">Soltar</button>
 </div>
 </div>
-<div id="mpOverlay">
+<div id="mpOverlay" style="display:none;">
 <div class="mpCard" id="mpScreenMode">
 <h2>Isla 3D</h2>
 <p class="mpSub">Elige cómo quieres jugar.</p>
@@ -281,7 +281,7 @@ background:radial-gradient(ellipse 900px 720px at 66% 58%,rgba(140,196,80,.16),t
 </div>
 <div id="mpKillFeed"></div>
 <div id="mpMatchEnd"><div><h1 id="mpMatchEndTitle">VICTORIA</h1><p class="mpSub" id="mpMatchEndSub"></p></div></div>
-<div id="startScreen" style="display:none;">
+<div id="startScreen">
 <div class="scanlines"></div>
 <div class="embers" id="embers"></div>
 <div class="lobbyTop">
@@ -1008,7 +1008,11 @@ requestAnimationFrame(loop);}document.getElementById('keysToggle').onclick=()=>{
 const installBtnEl=document.getElementById('installBtn');if(installBtnEl){if(window.matchMedia('(display-mode: standalone)').matches)installBtnEl.style.display='none';installBtnEl.onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;installBtnEl.style.display='none';}else{showMsg('En iOS: usa Compartir ▸ Añadir a pantalla de inicio');}};}
 function requestGameFullscreen(){const el=document.documentElement;const req=el.requestFullscreen||el.webkitRequestFullscreen||el.mozRequestFullScreen||el.msRequestFullscreen;if(req){try{req.call(el).catch(()=>{});}catch(e){}}if(screen.orientation&&screen.orientation.lock){try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}}}
 function beginMatch(){requestGameFullscreen();const ss=document.getElementById('startScreen');ss.style.opacity='0';setTimeout(()=>{ss.style.display='none';},420);gameStarted=true;refreshInvUI();updateAmmoHud();canvas.requestPointerLock();}
-document.getElementById('startBtn').onclick=beginMatch;
+document.getElementById('startBtn').onclick=function(){
+  const ss=document.getElementById('startScreen');
+  ss.style.opacity='0';
+  setTimeout(()=>{ss.style.display='none';document.getElementById('mpOverlay').style.display='flex';},420);
+};
 /* ===== Puente para el módulo de red multijugador (window.MPNet) ===== */
 window.__game={
 THREE,scene,camera,SPAWN,bullets,player,
@@ -1573,6 +1577,7 @@ function wireLobbyUI(){
   $('mpBtnSolo').onclick=()=>{
     document.getElementById('mpOverlay').style.display='none';
     if(window.__game&&window.__game.spawnInitialZombies)window.__game.spawnInitialZombies();
+    if(window.__game&&window.__game.beginMatch)window.__game.beginMatch();
   };
   $('mpBtnHost').onclick=async()=>{
     const name=$('mpPlayerName').value.trim()||'Host';
