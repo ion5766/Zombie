@@ -49,15 +49,13 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
 })();
 function _fbxFindBones(inst){
   const B=n=>inst.getObjectByName(n);
-  const bones={
+  return{
     upL:B('UpperLeg_L'),upR:B('UpperLeg_R'),loL:B('LowerLeg_L'),loR:B('LowerLeg_R'),
     shL:B('Shoulder_L')||B('Clavicle_L'),shR:B('Shoulder_R')||B('Clavicle_R'),
-    elL:B('Elbow_L'),elR:B('Elbow_R'),head:B('Head'),spine:B('Spine_01'),
+    elL:B('Elbow_L'),elR:B('Elbow_R'),head:B('Head'),neck:B('Neck'),
+    sp1:B('Spine_01'),sp2:B('Spine_02'),sp3:B('Spine_03'),hips:B('Hips'),
     handL:B('Hand_L'),handR:B('Hand_R')
   };
-  const baseX={},baseY={};
-  for(const k in bones){if(bones[k]){baseX[k]=bones[k].rotation.x;baseY[k]=bones[k].rotation.y;}}
-  return{bones,baseX,baseY};
 }
 // El bind pose del FBX es una T-pose (brazos extendidos a los costados). Aquí se bajan
 // los brazos a una postura de reposo natural para que ningún personaje (jugador, zombie,
@@ -68,6 +66,15 @@ function _fbxApplyRestPose(bones){
   if(bones.elL)bones.elL.rotation.x+=0.35;
   if(bones.elR)bones.elR.rotation.x+=0.35;
 }
+// IMPORTANTE: la "base" (X/Y/Z) se captura DESPUÉS de aplicar la pose de reposo, no antes.
+// Así todas las animaciones (caminar, apuntar, agachar, atacar...) parten siempre de la
+// postura de reposo correcta en vez de saltar de vuelta a la T-pose original cada vez que
+// se asigna B.hueso.rotation.x = (X.hueso||0) + algo.
+function _fbxCaptureBase(bones){
+  const baseX={},baseY={},baseZ={};
+  for(const k in bones){const b=bones[k];if(b){baseX[k]=b.rotation.x;baseY[k]=b.rotation.y;baseZ[k]=b.rotation.z;}}
+  return{baseX,baseY,baseZ};
+}
 function spawnCharVisual(material){
   if(!charTemplateReady)return null;
   // Object3D.clone(true) NO reconstruye el Skeleton de un SkinnedMesh: todas las copias
@@ -75,9 +82,10 @@ function spawnCharVisual(material){
   // hueso se veía). THREE.SkeletonUtils.clone sí crea un esqueleto propio por instancia.
   const inst=(THREE.SkeletonUtils&&THREE.SkeletonUtils.clone)?THREE.SkeletonUtils.clone(charTemplate):charTemplate.clone(true);
   inst.traverse(o=>{if(o.isMesh){o.material=material;}});
-  const rig=_fbxFindBones(inst);
-  _fbxApplyRestPose(rig.bones);
-  inst.userData.bones=rig.bones;inst.userData.baseX=rig.baseX;inst.userData.baseY=rig.baseY;
+  const bones=_fbxFindBones(inst);
+  _fbxApplyRestPose(bones);
+  const base=_fbxCaptureBase(bones);
+  inst.userData.bones=bones;inst.userData.baseX=base.baseX;inst.userData.baseY=base.baseY;inst.userData.baseZ=base.baseZ;
   return inst;
 }
 // Ciclo de caminata reutilizable para cualquier instancia FBX (jugadores remotos, zombies,
@@ -92,12 +100,96 @@ function animateFbxWalk(B,X,phase,amp){
   if(B.shR)B.shR.rotation.x=(X.shR||0)+swing*0.8;
 }
 // Postura de apuntado con arma de fuego: el brazo derecho (mano con la pistola) se levanta
-// al frente y el izquierdo acompaña como apoyo de dos manos.
+// al frente y el izquierdo acompaña como apoyo de dos manos. (No acumulativa: siempre
+// parte de X, por lo que se puede llamar todos los frames sin que el brazo se "enrolle".)
 function animateFbxAim(B,X,aimAmt){
   if(B.shR)B.shR.rotation.x=(X.shR||0)+0.95*aimAmt;
-  if(B.elR)B.elR.rotation.x=(B.elR.rotation.x||0)+0.35*aimAmt;
+  if(B.elR)B.elR.rotation.x=(X.elR||0)+0.85*aimAmt;
   if(B.shL)B.shL.rotation.x=(X.shL||0)+0.55*aimAmt;
-  if(B.elL)B.elL.rotation.x=(B.elL.rotation.x||0)+0.55*aimAmt;
+  if(B.elL)B.elL.rotation.x=(X.elL||0)+0.85*aimAmt;
+}
+/* ================= Sistema extendido de poses del personaje =================
+   Una sola función, no acumulativa (siempre parte de la bind-pose de reposo X/Y/Z),
+   que cubre: caminar, agachado, salto, sostener/caminar/apuntar/agachar con pistola,
+   sostener/caminar/atacar(ligero y fuerte)/agachar con hacha, puñetazos y la reacción
+   de recibir daño. La usan los jugadores remotos (game-network.js); los zombies siguen
+   usando su propio rig de cajas + syncFbxZombie porque ya tienen su propia IA de pose.
+   st = {
+     phase:0..2π  (fase del ciclo de paso),
+     moveAmp:0..1 (0 = quieto, 1 = caminando/corriendo a máxima amplitud),
+     crouch:0..1  (0 = de pie, 1 = agachado),
+     air:0..1     (0 = en el suelo, 1 = saltando/cayendo),
+     weapon:'none'|'ranged'|'melee'|'item',
+     aim:0..1     (solo aplica si weapon==='ranged'),
+     atkKind:null|'meleeLight'|'meleeHeavy'|'punchL'|'punchR',
+     atkT:0..1    (1 = inicio del golpe, decae a 0 = golpe terminado),
+     hitT:0..1    (1 = golpe recién recibido, decae a 0)
+   } */
+function animateFbxCharacter(inst,st){
+  if(!inst||!inst.userData||!inst.userData.bones)return;
+  const B=inst.userData.bones,X=inst.userData.baseX||{},Y=inst.userData.baseY||{},Z=inst.userData.baseZ||{};
+  st=st||{};
+  const crouch=clamp(st.crouch||0,0,1),air=clamp(st.air||0,0,1),moveAmp=clamp(st.moveAmp||0,0,1);
+  const phase=st.phase||0,weapon=st.weapon||'none',aim=clamp(st.aim||0,0,1);
+  const atkKind=st.atkKind||null,atkT=clamp(st.atkT||0,0,1),hitT=clamp(st.hitT||0,0,1);
+
+  // --- Piernas: ciclo de paso, atenuado al agachar y en el aire; se doblan al saltar/agachar ---
+  const legAmp=moveAmp*(1-air*0.7)*(1-crouch*0.45);
+  const swingLeg=Math.sin(phase)*0.55*legAmp;
+  if(B.upL)B.upL.rotation.x=(X.upL||0)+swingLeg-crouch*0.95-air*0.30;
+  if(B.upR)B.upR.rotation.x=(X.upR||0)-swingLeg-crouch*0.95+air*0.18;
+  if(B.loL)B.loL.rotation.x=(X.loL||0)+Math.max(0,-Math.sin(phase))*0.75*legAmp+crouch*1.55+air*0.38;
+  if(B.loR)B.loR.rotation.x=(X.loR||0)+Math.max(0,Math.sin(phase))*0.75*legAmp+crouch*1.55+air*0.58;
+
+  // --- Columna/cuello: leve flexión al agacharse, sacudida hacia atrás al recibir daño ---
+  const spineBend=crouch*0.16;
+  if(B.sp1)B.sp1.rotation.x=(X.sp1||0)+spineBend+hitT*0.16;
+  if(B.sp2)B.sp2.rotation.x=(X.sp2||0)+spineBend+hitT*0.12;
+  if(B.sp3)B.sp3.rotation.x=(X.sp3||0)+spineBend*0.8-hitT*0.08;
+  if(B.neck)B.neck.rotation.x=(X.neck||0)-hitT*0.30;
+  if(B.hips)B.hips.rotation.x=(X.hips||0)+crouch*0.10;
+
+  // --- Brazos: pose base según el arma equipada, mezclada con el balanceo del paso ---
+  const walkArm=Math.sin(phase)*0.5*legAmp;
+  let shLx=(X.shL||0)+walkArm*0.75,shRx=(X.shR||0)-walkArm*0.75,elLx=(X.elL||0),elRx=(X.elR||0),shRz=(Z.shR||0);
+  if(weapon==='ranged'){
+    // Guardia baja a dos manos con la pistola; sube a la postura de apuntado con "aim".
+    shRx=(X.shR||0)+0.55+0.40*aim-walkArm*0.12;
+    elRx=(X.elR||0)+0.95+0.35*aim;
+    shLx=(X.shL||0)+0.42+0.13*aim-walkArm*0.12;
+    elLx=(X.elL||0)+0.90+0.55*aim;
+  }else if(weapon==='melee'){
+    // Guardia con el hacha a dos manos frente al pecho; el ataque toma el control cuando hay uno activo.
+    shRx=(X.shR||0)+0.62-walkArm*0.22;
+    elRx=(X.elR||0)+1.15;
+    shLx=(X.shL||0)+0.55-walkArm*0.22;
+    elLx=(X.elL||0)+1.0;
+    if(atkKind==='meleeHeavy'&&atkT>0){
+      // Golpe fuerte a dos manos, de arriba hacia abajo.
+      const p=1-atkT;let raise,thrust;
+      if(p<0.32){const k=p/0.32;raise=k*k*(3-2*k);thrust=0;}
+      else{const k=Math.min(1,(p-0.32)/0.68);const e=1-Math.pow(1-k,2);raise=1-e;thrust=e;}
+      shRx=(X.shR||0)-2.05*raise+0.85*thrust;
+      shLx=(X.shL||0)-1.85*raise+0.80*thrust;
+      elRx=(X.elR||0)-0.25*raise-0.55*thrust;
+      elLx=(X.elL||0)-0.20*raise-0.50*thrust;
+    }else if(atkKind==='meleeLight'&&atkT>0){
+      // Tajo lateral rápido con el brazo derecho.
+      const p=1-atkT,e=Math.sin(Math.min(1,p)*Math.PI);
+      shRx=(X.shR||0)+0.70-0.55*e;
+      shRz=(Z.shR||0)-e*1.05;
+      elRx=(X.elR||0)+1.10-0.65*e;
+    }
+  }else{
+    if(atkKind==='punchR'&&atkT>0){const e=Math.sin((1-atkT)*Math.PI);shRx=(X.shR||0)-1.55*e-walkArm*0.75;elRx=(X.elR||0)-0.30*e;}
+    if(atkKind==='punchL'&&atkT>0){const e=Math.sin((1-atkT)*Math.PI);shLx=(X.shL||0)-1.55*e+walkArm*0.75;elLx=(X.elL||0)-0.30*e;}
+  }
+  // Reacción a recibir daño: ambos brazos se recogen brevemente hacia el cuerpo.
+  if(hitT>0){shRx+=-0.22*hitT;shLx+=-0.22*hitT;elRx+=0.25*hitT;elLx+=0.25*hitT;}
+  if(B.shR){B.shR.rotation.x=shRx;B.shR.rotation.z=shRz;}
+  if(B.shL)B.shL.rotation.x=shLx;
+  if(B.elR)B.elR.rotation.x=elRx;
+  if(B.elL)B.elL.rotation.x=elLx;
 }
 function syncFbxZombie(z){
   const inst=z.fbxInst;if(!inst)return;
@@ -442,6 +534,7 @@ function updateCharacterPreview(){cBackpack.visible= !!equip.backpack;updateEqui
 if(charRenderer)charRenderer.render(charScene,charCam);}const useMesh=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.12,0.12),new THREE.MeshLambertMaterial({color:0xffcf6b}));
 useMesh.position.set(0.2,-0.3,-0.45);useMesh.visible=false;camera.add(useMesh);let weaponKick=0;let reloading=false,reloadT=0,reloadDuration=1;let useAction=null;let isAiming=false;
 let isCrouching=false;let currentSpread=0;let leftPunchT=0,rightPunchT=0;let axeSwingLightT=0,axeSwingHeavyT=0;let axeHitstopT=0,camPunch=0;let pendingMeleeHit=null;let lastWPressTime=0;
+let hitFlashT=0; // decae de 1→0: usado para que OTROS jugadores vean nuestra reacción al recibir daño
 let isSprinting=false;function updateHeldWeaponVisibility(){if(isDriving){weaponGroup.visible=false;axeGroup.visible=false;return{isRanged:false,isAxe:false,activeItem:null};
 }const activeItem=equip[activeSlotKey];const id=activeItem?activeItem.id:null;const isRanged= !!(id&&ITEMS[id]&&ITEMS[id].ranged);const isAxe= !!(id&&ITEMS[id]&&ITEMS[id].melee);
 weaponGroup.visible=isRanged;axeGroup.visible=isAxe;return{isRanged,isAxe,activeItem};}function isEquippedRanged(){const it=equip[activeSlotKey];return!!(it&&ITEMS[it.id]&&ITEMS[it.id].ranged);}
@@ -497,7 +590,7 @@ z.deadT+=dt;z.despawnTimer-=dt;const g=z.grp,k=Math.min(1,dt*7);if(!z.settled){z
 z.pw+=((z.pitchT-z.pitch)*34-z.pw*6.5)*dt;z.pitch+=z.pw*dt;z.rw+=((z.rollT-z.roll)*22-z.rw*6)*dt;z.roll+=z.rw*dt;z.yaw+=z.yw*dt;z.yw*=Math.exp(-dt*3);g.rotation.set(z.pitch,z.yaw,z.roll,'YXZ');
 const L=z.limp,lp=(o,a,t)=>{o.rotation[a]+=(t-o.rotation[a])*k;};lp(z.armL.shoulder,'x',L[0]);lp(z.armR.shoulder,'x',L[1]);lp(z.armL.shoulder,'z',L[2]);lp(z.armR.shoulder,'z',-L[2]);
 lp(z.armL.elbow,'x',L[3]);lp(z.armR.elbow,'x',L[3]*.7);lp(z.legL.hip,'x',L[4]);lp(z.legR.hip,'x',L[5]);lp(z.legL.hip,'z',-.15);lp(z.legR.hip,'z',.15);lp(z.legL.knee,'x',L[6]);lp(z.legR.knee,'x',L[6]*.6);
-lp(z.headPivot,'x',L[7]);lp(z.headPivot,'y',L[8]);lp(z.hips,'x',0);z.hips.position.y+=(.92-z.hips.position.y)*k;z.hips.position.z*=1-k;const gh=groundHeightAt(z.x,z.z,z.dy+.3);
+lp(z.headPivot,'x',L[7]);lp(z.headPivot,'y',L[8]);lp(z.hips,'x',0);z.hips.position.y+=(.92-z.hips.position.y)*k;z.hips.position.z*=1-k;syncFbxZombie(z);const gh=groundHeightAt(z.x,z.z,z.dy+.3);
 g.position.set(z.x,z.dy,z.z);g.updateMatrixWorld(true);const minY=new THREE.Box3().setFromObject(g).min.y;if(minY<gh){z.dy+=gh-minY;if(z.dvy<0)z.dvy=Math.abs(z.dvy)>2.2?-z.dvy*.28:0;}
 if(minY<gh+.05){const f=Math.exp(-dt*6);z.dvx*=f;z.dvz*=f;}if(z.deadT>2.2&&minY<gh+.05&&Math.hypot(z.dvx,z.dvz)<.08&&Math.abs(z.pw)<.05&&Math.abs(z.rw)<.05)z.settled=true;
 }if(z.puddle){z.puddle.position.set(z.x,groundHeightAt(z.x,z.z,z.dy+.3)+.02,z.z);z.puddle.scale.setScalar(.05+Math.min(1,Math.max(0,(z.deadT-.4)/3))*.95);}return z.despawnTimer<=0;
@@ -517,7 +610,7 @@ const wx=car.x+(w.lx*cosR+w.lz*sinR);const wz=car.z+(-w.lx*sinR+w.lz*cosR);if(Ma
 for(let i=zombies.length-1;i>=0;i--){const z=zombies[i];collY=z.standY||0;collZ=true;if(!z.alive){if(deadZombie(z,dt)){scene.remove(z.grp);if(z.puddle)scene.remove(z.puddle);zombies.splice(i,1);const sp=randomZombieSpawnPos();spawnZombie(sp.x,sp.z);}continue;}
 if(z.bleedTimer>0){z.bleedTimer-=dt;z.bleedTickTimer=(z.bleedTickTimer||0)+dt;if(z.bleedTickTimer>=0.4){z.bleedTickTimer=0;z.hp-=z.bleedDmgPerSec*0.4;z.hitFlash=0.1;spawnBloodImpact(new THREE.Vector3(z.x,0.8+Math.random()*0.5,z.z));
 if(z.hp<=0){killZombie(z);continue;}}}z.hitFlash=Math.max(0,z.hitFlash-dt);const tint=z.hitFlash>0?0x990000:0x000000;z.bodyMat.emissive.setHex(tint);z.headMat.emissive.setHex(tint);
-if(z.state==='crawlIn'){z.crawlT+=dt;const T1=0.55,T2=0.85,T3=1.35;let px,pz,bodyPitch,bodyY;if(z.crawlT<T1){const p=z.crawlT/T1,ep=p*p*(3-2*p);px=z.crawlStart.x+(z.crawlEnd.x-z.crawlStart.x)*ep*0.7;pz=z.crawlStart.z+(z.crawlEnd.z-z.crawlStart.z)*ep*0.7;bodyPitch=1.15;bodyY=0.55;}else if(z.crawlT<T2){const p=(z.crawlT-T1)/(T2-T1);px=z.crawlStart.x+(z.crawlEnd.x-z.crawlStart.x)*(0.7+0.3*p);pz=z.crawlStart.z+(z.crawlEnd.z-z.crawlStart.z)*(0.7+0.3*p);bodyPitch=1.15+p*0.35;bodyY=0.55-p*0.42;}else{const p=clamp((z.crawlT-T2)/(T3-T2),0,1),ep=1-Math.pow(1-p,2);px=z.crawlEnd.x;pz=z.crawlEnd.z;bodyPitch=1.5*(1-ep);bodyY=0.13+ep*0.79;}{const rzc=resolveAllCollisionsExceptWindows(px,pz,z.r*0.7);px=rzc.x;pz=rzc.z;}z.x=px;z.z=pz;const groundY=groundHeightAt(z.x,z.z,z.standY);z.standY=(z.standY===undefined?groundY:z.standY+(groundY-z.standY)*Math.min(1,dt*20));z.heading+=angD(z.heading,z.crawlHeading)*Math.min(1,dt*8);z.grp.position.set(z.x,z.standY,z.z);z.grp.rotation.y=z.heading;z.hips.rotation.x=bodyPitch;z.hips.position.y=bodyY;const crawlSwing=Math.sin(z.crawlT*14)*0.5;z.armL.shoulder.rotation.x=-1.3+crawlSwing*0.3;z.armR.shoulder.rotation.x=-1.3-crawlSwing*0.3;z.armL.elbow.rotation.x=-0.4;z.armR.elbow.rotation.x=-0.4;z.legL.hip.rotation.x=crawlSwing*0.6;z.legR.hip.rotation.x=-crawlSwing*0.6;z.headPivot.rotation.x=z.crawlT<T2?0.3:0.3*(1-Math.min(1,(z.crawlT-T2)/(T3-T2)));if(z.crawlT>=T3){z.hips.rotation.x=0;z.hips.position.y=0.92;const rzf=resolveAllCollisions(z.x,z.z,z.r);z.x=rzf.x;z.z=rzf.z;z.state=z.hunt?'chase':'idle';z.idleT=rand(1,2.5);z.crawlCd=1.0;z.crawlWin=null;z.lastX=player.x;z.lastZ=player.z;z.lastT=0;}continue;}if(z.crawlCd>0)z.crawlCd-=dt;else{for(const cw of windows){if(!cw.broken)continue;const ax2=cw.wallAxis;const wallCoord2=ax2==='x'?cw.z:cw.x;const curCross2=ax2==='x'?z.z:z.x;const alongMin2=ax2==='x'?cw.minX:cw.minZ,alongMax2=ax2==='x'?cw.maxX:cw.maxZ;const curAlong2=ax2==='x'?z.x:z.z;if(curAlong2<alongMin2-0.4||curAlong2>alongMax2+0.4)continue;if(Math.abs(cw.sillY-.9-(z.standY||0))>1.7)continue;if(Math.abs(curCross2-wallCoord2)<0.8){startWindowCrawl(z,cw);break;}}}
+if(z.state==='crawlIn'){z.crawlT+=dt;const T1=0.55,T2=0.85,T3=1.35;let px,pz,bodyPitch,bodyY;if(z.crawlT<T1){const p=z.crawlT/T1,ep=p*p*(3-2*p);px=z.crawlStart.x+(z.crawlEnd.x-z.crawlStart.x)*ep*0.7;pz=z.crawlStart.z+(z.crawlEnd.z-z.crawlStart.z)*ep*0.7;bodyPitch=1.15;bodyY=0.55;}else if(z.crawlT<T2){const p=(z.crawlT-T1)/(T2-T1);px=z.crawlStart.x+(z.crawlEnd.x-z.crawlStart.x)*(0.7+0.3*p);pz=z.crawlStart.z+(z.crawlEnd.z-z.crawlStart.z)*(0.7+0.3*p);bodyPitch=1.15+p*0.35;bodyY=0.55-p*0.42;}else{const p=clamp((z.crawlT-T2)/(T3-T2),0,1),ep=1-Math.pow(1-p,2);px=z.crawlEnd.x;pz=z.crawlEnd.z;bodyPitch=1.5*(1-ep);bodyY=0.13+ep*0.79;}{const rzc=resolveAllCollisionsExceptWindows(px,pz,z.r*0.7);px=rzc.x;pz=rzc.z;}z.x=px;z.z=pz;const groundY=groundHeightAt(z.x,z.z,z.standY);z.standY=(z.standY===undefined?groundY:z.standY+(groundY-z.standY)*Math.min(1,dt*20));z.heading+=angD(z.heading,z.crawlHeading)*Math.min(1,dt*8);z.grp.position.set(z.x,z.standY,z.z);z.grp.rotation.y=z.heading;z.hips.rotation.x=bodyPitch;z.hips.position.y=bodyY;const crawlSwing=Math.sin(z.crawlT*14)*0.5;z.armL.shoulder.rotation.x=-1.3+crawlSwing*0.3;z.armR.shoulder.rotation.x=-1.3-crawlSwing*0.3;z.armL.elbow.rotation.x=-0.4;z.armR.elbow.rotation.x=-0.4;z.legL.hip.rotation.x=crawlSwing*0.6;z.legR.hip.rotation.x=-crawlSwing*0.6;z.headPivot.rotation.x=z.crawlT<T2?0.3:0.3*(1-Math.min(1,(z.crawlT-T2)/(T3-T2)));syncFbxZombie(z);if(z.crawlT>=T3){z.hips.rotation.x=0;z.hips.position.y=0.92;const rzf=resolveAllCollisions(z.x,z.z,z.r);z.x=rzf.x;z.z=rzf.z;z.state=z.hunt?'chase':'idle';z.idleT=rand(1,2.5);z.crawlCd=1.0;z.crawlWin=null;z.lastX=player.x;z.lastZ=player.z;z.lastT=0;}continue;}if(z.crawlCd>0)z.crawlCd-=dt;else{for(const cw of windows){if(!cw.broken)continue;const ax2=cw.wallAxis;const wallCoord2=ax2==='x'?cw.z:cw.x;const curCross2=ax2==='x'?z.z:z.x;const alongMin2=ax2==='x'?cw.minX:cw.minZ,alongMax2=ax2==='x'?cw.maxX:cw.maxZ;const curAlong2=ax2==='x'?z.x:z.z;if(curAlong2<alongMin2-0.4||curAlong2>alongMax2+0.4)continue;if(Math.abs(cw.sillY-.9-(z.standY||0))>1.7)continue;if(Math.abs(curCross2-wallCoord2)<0.8){startWindowCrawl(z,cw);break;}}}
 const T=z.t,driving=isDriving&&drivingCar&&player.alive;const d=Math.hypot(z.x-player.x,z.z-player.z);z.senseT-=dt;z.lastT+=dt;z.attackCd-=dt;if(z.senseT<=0){z.senseT=.16+Math.random()*.1;let g=0;
 if(player.alive){const hid=isCrouching&&!driving,R=(driving?18:14)*(z.state==='chase'?1.4:1);const dot=d>.01?((player.x-z.x)*Math.sin(z.heading)+(player.z-z.z)*Math.cos(z.heading))/d:1;
 const clear=d<R+4?losClear(z.x,z.z,player.x,player.z,driving?2.6:.8):false;const see=!hid&&clear&&d<R&&dot>(z.state==='chase'?-.25:.35);const near=!hid&&d<4.5&&(clear||d<2.5),touch=d<z.r+player.r+.4&&Math.abs((z.standY||0)-player.standY)<1.3;z.clr=clear&&d<26&&!segBlocked(z.x,z.z,player.x,player.z);
@@ -536,7 +629,7 @@ case'patrol':tx=z.tx;tz=z.tz;sp=W*.4;z.stT-=dt;if(Math.hypot(tx-z.x,tz-z.z)<1.5|
 look=[t.x,t.z];if(z.sniffT===undefined){z.stT-=dt;const dd=Math.hypot(t.x-z.x,t.z-z.z);if(dd<z.r+1.2)z.sniffT=rand(2.2,3.8);else if(z.stT<=0){z.state='idle';z.idleT=2;}else{tx=t.x;tz=t.z;sp=W*.33;}}
 else{z.sniffT-=dt;if(z.sniffT<=0){z.sniffT=undefined;if(Math.random()<.5){z.state='bash';z.bashType='door';z.bashCd=0;z.bashHits=Math.floor(rand(2,5));}else{z.state='idle';z.idleT=rand(1.5,3);}}}
 break;}case'seek':if(z.bashTarget){tx=z.bashTarget.x;tz=z.bashTarget.z;sp=W*.9;look=[tx,tz];}else z.state='chase';break;case'bash':if(z.bashTarget)look=[z.bashTarget.x,z.bashTarget.z];break;
-}if(inRange&&z.attackCd<=0){if(atkLocal){player.hp-=rand(8,15)*playerDamageMultiplier()*T.dm*(driving?.55:1);flashHurt();showMsg(driving?'¡Los zombies golpean el auto!':'¡El zombie te golpeó!');}else if(window.MPNet&&MPNet.sendZombieDamageToPlayer){MPNet.sendZombieDamageToPlayer(atkTargetId,rand(8,15)*T.dm);}z.attackCd=rand(.9,1.2);z.attackAnimT=1.0;
+}if(inRange&&z.attackCd<=0){if(atkLocal){player.hp-=rand(8,15)*playerDamageMultiplier()*T.dm*(driving?.55:1);flashHurt();hitFlashT=1;showMsg(driving?'¡Los zombies golpean el auto!':'¡El zombie te golpeó!');}else if(window.MPNet&&MPNet.sendZombieDamageToPlayer){MPNet.sendZombieDamageToPlayer(atkTargetId,rand(8,15)*T.dm);}z.attackCd=rand(.9,1.2);z.attackAnimT=1.0;
 }let dvx=0,dvz=0;if(sp>0&&tx!==null){const len=Math.hypot(tx-z.x,tz-z.z)||1;let a=Math.atan2(tx-z.x,tz-z.z);if(z.state==='chase')a+=z.flank*clamp((len-2.5)/9,0,1);if(z.state!=='seek'&&z.state!=='sniff')a=steerAng(z,a);
 const k=inRange?0:len<1.2?len/1.2:1;dvx=Math.sin(a)*sp*k;dvz=Math.cos(a)*sp*k;}for(const o of zombies){if(o===z||!o.alive)continue;const ox=z.x-o.x,oz=z.z-o.z,od=Math.hypot(ox,oz);
 if(od<1.5&&od>.001){const f=(1.5-od)/1.5*1.6;dvx+=ox/od*f;dvz+=oz/od*f;}}const acc=1-Math.exp(-dt*(z.state==='chase'?6:3));z.vx+=(dvx-z.vx)*acc;z.vz+=(dvz-z.vz)*acc;const ox0=z.x,oz0=z.z,nx=z.x+z.vx*dt,nz=z.z+z.vz*dt;
@@ -632,6 +725,7 @@ function relockAfterPanelClose(){hideTooltip();if(gameStarted&&player.alive&&doc
 if(!isDriving&&meta&&meta.ranged){hud.style.display='block';hud.childNodes[0].nodeValue=`${item.loaded||0} / ${meta.mag}`;document.getElementById('ammoSub').textContent='reserva: '+countItem(meta.ammo);}else hud.style.display='none';
 }let last=performance.now();let gameStarted=false;let tabHidden=false;const _rHandTmp=new THREE.Vector3();const _lHandTmp=new THREE.Vector3();document.addEventListener('visibilitychange',()=>{tabHidden=document.hidden;if(!tabHidden)last=performance.now();});function update(dt){if(msgTimer>0){msgTimer-=dt;if(msgTimer<=0)document.getElementById('msg').style.opacity=0;}if(player.attackCd>0)player.attackCd-=dt;
 if(leftPunchT>0)leftPunchT=Math.max(0,leftPunchT-dt*4.5);if(rightPunchT>0)rightPunchT=Math.max(0,rightPunchT-dt*3.5);if(axeHitstopT>0)axeHitstopT=Math.max(0,axeHitstopT-dt);
+if(hitFlashT>0)hitFlashT=Math.max(0,hitFlashT-dt*2.6);
 const swingDt=axeHitstopT>0?0:dt;if(axeSwingLightT>0)axeSwingLightT=Math.max(0,axeSwingLightT-swingDt*2.8);if(axeSwingHeavyT>0)axeSwingHeavyT=Math.max(0,axeSwingHeavyT-swingDt*1.8);
 if(camPunch>0)camPunch=Math.max(0,camPunch-dt*6);if(pendingMeleeHit){pendingMeleeHit.timer-=dt;if(pendingMeleeHit.timer<=0){const connected=checkMeleeHit(pendingMeleeHit.dmg,pendingMeleeHit.rng,forwardVec(),pendingMeleeHit.meta,pendingMeleeHit.bleed);
 if(connected){axeHitstopT=pendingMeleeHit.heavy?0.07:0.03;camPunch=pendingMeleeHit.heavy?1.0:0.4;}pendingMeleeHit=null;}}for(const t of targets){if(!t.alive){t.respawn-=dt;if(t.respawn<=0){t.alive=true;t.hp=t.maxhp;t.grp.visible=true;}}}
@@ -714,13 +808,23 @@ document.getElementById('startBtn').onclick=function(){
 /* ===== Puente para el módulo de red multijugador (window.MPNet) ===== */
 window.__game={
 THREE,scene,camera,SPAWN,bullets,player,
-spawnCharVisual,charTemplateReady:()=>charTemplateReady,animateFbxWalk,animateFbxAim,
+spawnCharVisual,charTemplateReady:()=>charTemplateReady,animateFbxWalk,animateFbxAim,animateFbxCharacter,
 showMsg,flashHurt,spawnBloodImpact,showHitMarker,
 equip,ITEMS,activeSlotKey:()=>activeSlotKey,
 beginMatch,
 spawnInitialZombies,
 isAlive:()=>player.alive,
-getLocalState:()=>{const it=equip[activeSlotKey];const meta=it?ITEMS[it.id]:null;const wKind=meta?(meta.ranged?'ranged':meta.melee?'melee':'item'):'none';return{x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive,jumpY:+((player._jumpY)||0).toFixed(2),wKind,wId:it?it.id:null};},
+getLocalState:()=>{const it=equip[activeSlotKey];const meta=it?ITEMS[it.id]:null;const wKind=meta?(meta.ranged?'ranged':meta.melee?'melee':'item'):'none';return{x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive,jumpY:+((player._jumpY)||0).toFixed(2),wKind,wId:it?it.id:null,crouch:isCrouching?1:0,aim:(isAiming&&wKind==='ranged')?1:0,air:(!player.onGround||player._jumpY>0.04)?1:0};},
+// Determina el "tipo" de ataque que se está ejecutando ahora mismo (para animar a los
+// demás jugadores) y decae localmente igual que las variables que lo manejan aquí.
+getLocalAttackState:()=>{
+  if(axeSwingHeavyT>0)return{kind:'meleeHeavy',t:axeSwingHeavyT};
+  if(axeSwingLightT>0)return{kind:'meleeLight',t:axeSwingLightT};
+  if(rightPunchT>0)return{kind:'punchR',t:rightPunchT};
+  if(leftPunchT>0)return{kind:'punchL',t:leftPunchT};
+  return{kind:null,t:0};
+},
+getLocalHitFlash:()=>hitFlashT,
 getZombieSnapshot:function(){return zombies.filter(z=>!z.remote).map(z=>({id:z.netId,x:+z.x.toFixed(1),z:+z.z.toFixed(1),h:+z.heading.toFixed(2),hp:Math.max(0,Math.round(z.hp)),alive:z.alive,ty:z.t===ZT[1]?1:z.t===ZT[2]?2:0,sc:z.grp.scale.x,mv:Math.hypot(z.vx||0,z.vz||0)>0.3?1:0}));},
 applyZombieSnapshot:function(list){for(const e of list){let z=zombies.find(zz=>zz.netId===e.id);if(!z)z=createRemoteZombie(e.id,e.x,e.z,e.ty,e.sc);if(!z)continue;z.tx=e.x;z.tz=e.z;z.theading=e.h;z.hp=e.hp;z.netMoving=e.mv;if(e.alive===false&&z.alive){z.alive=false;killZombie(z,{x:Math.sin(e.h),z:Math.cos(e.h)});}}},
 applyZombieHit:function(netId,dmg,bleed){const z=zombies.find(zz=>zz.netId===netId&&zz.alive&&!zz.remote);if(!z)return;z.hp-=dmg;z.hitFlash=0.15;if(bleed){z.bleedTimer=bleed.bleedDuration||4;z.bleedDmgPerSec=bleed.bleedDmg;z.bleedTickTimer=0;}if(z.hp<=0)killZombie(z);},
@@ -734,6 +838,7 @@ applyRemoteDamageToLocal:function(dmg,fromName){
 if(!player.alive)return;
 player.hp=clamp(player.hp-dmg,0,player.maxhp||100);
 flashHurt();
+hitFlashT=1;
 showHitMarker();
 if(player.hp<=0&&player.alive)die();
 },
