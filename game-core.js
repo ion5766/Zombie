@@ -19,26 +19,21 @@ if(!inventory[i]){const add=Math.min(meta.stack,qty);inventory[i]={id,qty:add};q
 for(const k in equip)if(equip[k]&&equip[k].id===id)n+=equip[k].qty||1;return n;}function removeItem(id,qty){for(let i=0;i<inventory.length&&qty>0;i++){const s=inventory[i];
 if(s&&s.id===id){const rm=Math.min(s.qty,qty);s.qty-=rm;qty-=rm;if(s.qty<=0)inventory[i]=null;}}refreshInvUI();}const canvas=document.getElementById('renderCanvas');const isCoarsePointer=window.matchMedia&&window.matchMedia('(pointer:coarse)').matches;const renderer=new THREE.WebGLRenderer({canvas,antialias:!isCoarsePointer,logarithmicDepthBuffer:true,powerPreference:'high-performance',stencil:false});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio,isCoarsePointer?1:1.5));renderer.setSize(window.innerWidth,window.innerHeight);const scene=new THREE.Scene();scene.background=new THREE.Color(0xa9c9e6);
-/* ===== Modelo de personaje X_Bot.fbx (jugadores, zombies, inventario, menu) =====
-   Los jugadores usan la animación real Walking.fbx (AnimationClip + AnimationMixer).
-   Los zombies, por ahora, usan el mismo modelo X Bot pero se quedan en la T-pose
-   original del FBX (sin animación) hasta que se agregue su propia animación. */
+/* ===== Modelo de personaje Md_Char_Low_Poly_Man.fbx (jugadores, zombies, inventario, menu) =====
+   Este modelo NO trae animaciones propias (solo su pose de referencia), así que en vez de
+   reproducir un AnimationClip grabado, las poses de caminar/idle/saltar/agacharse se calculan
+   cada frame rotando a mano los huesos del esqueleto (ver poseHumanoidFbx más abajo). Por ahora
+   esa animación por código solo se aplica a los JUGADORES; los zombies (que reusan el mismo
+   modelo, teñido de verde) se quedan en su pose de referencia (tpose:true), tal como se hacía
+   antes con el modelo anterior. */
 let charTemplate=null, charTemplateReady=false;
-let walkClip=null, walkClipReady=false;
 function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(bin.length);const view=new Uint8Array(buf);for(let i=0;i<bin.length;i++)view[i]=bin.charCodeAt(i);return buf;}
 (function initCharTemplate(){
   try{
     if(typeof THREE.FBXLoader!=='function'){console.warn('FBXLoader no disponible, se usa el modelo de bloques por defecto.');return;}
-    const buf=_fbxBase64ToBuffer(FBX_XBOT_B64);
+    const buf=_fbxBase64ToBuffer(FBX_CHAR_B64);
     const loader=new THREE.FBXLoader();
     const obj=loader.parse(buf,'');
-    // X_Bot.fbx trae 2 mallas (el cuerpo y una malla extra de "esferas" en las
-    // articulaciones) y CADA UNA arrastra su propia jerarquía de huesos, anidada una
-    // dentro de la otra pero con los MISMOS nombres (p.ej. dos huesos "mixamorigHips").
-    // Si se deja así, el AnimationMixer/PropertyBinding puede terminar animando el hueso
-    // duplicado equivocado (el que no controla la malla visible) y el personaje se queda
-    // congelado en la T-pose aunque la animación esté "reproduciéndose". Renombramos los
-    // huesos duplicados para que la búsqueda por nombre sea inequívoca.
     (function dedupBoneNames(root){
       const seen=new Set();
       root.traverse(o=>{if(o.isBone){if(seen.has(o.name))o.name=o.name+'__dup';else seen.add(o.name);}});
@@ -50,7 +45,10 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
     const TARGET_HEIGHT=1.86; // altura aproximada usada por el rig de cajas original
     const s=(size.y>0.0001)?TARGET_HEIGHT/size.y:1;
     obj.scale.setScalar(s);
-    obj.rotation.y=Math.PI; // si el modelo mira "para adentro" de la pantalla, cambia esto a 0
+    // Si el modelo se ve "mirando para adentro de la pantalla" (de espaldas) en vez de de
+    // frente, cambia este valor de Math.PI a 0 (o viceversa) — es lo único que depende de
+    // cómo se exportó el FBX y solo se puede confirmar viéndolo en pantalla.
+    obj.rotation.y=0;
     obj.updateMatrixWorld(true);
     box=new THREE.Box3().setFromObject(obj);
     obj.position.x-=(box.min.x+box.max.x)/2;
@@ -59,45 +57,30 @@ function _fbxBase64ToBuffer(b64){const bin=atob(b64);const buf=new ArrayBuffer(b
     obj.updateMatrixWorld(true);
     obj.traverse(o=>{if(o.isMesh){o.frustumCulled=false;o.castShadow=false;o.receiveShadow=false;}});
     charTemplate=obj;charTemplateReady=true;
-    console.log('%c[Modelo FBX] X_Bot cargado correctamente ✔','color:#7fd858');
-  }catch(e){console.error('[Modelo FBX] No se pudo cargar X_Bot.fbx, se usa el modelo de bloques por defecto. Motivo:',e);}
+    console.log('%c[Modelo FBX] Low Poly Man cargado correctamente ✔','color:#7fd858');
+  }catch(e){console.error('[Modelo FBX] No se pudo cargar Md_Char_Low_Poly_Man.fbx, se usa el modelo de bloques por defecto. Motivo:',e);}
 })();
-// Carga la animación de caminata (Walking.fbx) como AnimationClip. Al venir del mismo
-// esqueleto Mixamo que X_Bot.fbx, se puede reproducir directamente sobre cada instancia
-// clonada del modelo mediante THREE.AnimationMixer.
-(function initWalkClip(){
-  try{
-    if(typeof THREE.FBXLoader!=='function')return;
-    const buf=_fbxBase64ToBuffer(FBX_WALK_B64);
-    const loader=new THREE.FBXLoader();
-    const obj=loader.parse(buf,'');
-    if(obj.animations&&obj.animations.length){
-      walkClip=obj.animations[0];
-      walkClipReady=true;
-      console.log('%c[Animación FBX] Walking cargada correctamente ✔','color:#7fd858');
-    }
-  }catch(e){console.error('[Animación FBX] No se pudo cargar Walking.fbx. Motivo:',e);}
-})();
-// X_Bot.fbx / Walking.fbx usan el esqueleto estándar de Mixamo (huesos con prefijo
-// "mixamorig:"), a diferencia del modelo low-poly anterior.
+// Nombres reales de los huesos de Md_Char_Low_Poly_Man.fbx (no usa el esqueleto Mixamo del
+// modelo anterior). Las claves de la derecha (upL, upR, shL...) son las que usa el resto del
+// código, así que si el modelo cambia de nuevo solo hay que actualizar los nombres de aquí.
 function _fbxFindBones(inst){
   const B=n=>inst.getObjectByName(n);
   const bones={
-    upL:B('mixamorigLeftUpLeg')||B('mixamorig:LeftUpLeg'),upR:B('mixamorigRightUpLeg')||B('mixamorig:RightUpLeg'),
-    loL:B('mixamorigLeftLeg')||B('mixamorig:LeftLeg'),loR:B('mixamorigRightLeg')||B('mixamorig:RightLeg'),
-    shL:B('mixamorigLeftArm')||B('mixamorig:LeftArm'),shR:B('mixamorigRightArm')||B('mixamorig:RightArm'),
-    elL:B('mixamorigLeftForeArm')||B('mixamorig:LeftForeArm'),elR:B('mixamorigRightForeArm')||B('mixamorig:RightForeArm'),
-    head:B('mixamorigHead')||B('mixamorig:Head'),spine:B('mixamorigSpine')||B('mixamorig:Spine'),
-    handL:B('mixamorigLeftHand')||B('mixamorig:LeftHand'),handR:B('mixamorigRightHand')||B('mixamorig:RightHand')
+    hips:B('Hips'),spine:B('Spine_01'),
+    upL:B('UpperLeg_L'),upR:B('UpperLeg_R'),
+    loL:B('LowerLeg_L'),loR:B('LowerLeg_R'),
+    shL:B('Shoulder_L'),shR:B('Shoulder_R'),
+    elL:B('Elbow_L'),elR:B('Elbow_R'),
+    head:B('Head'),
+    handL:B('Hand_L'),handR:B('Hand_R')
   };
   const baseX={},baseY={};
   for(const k in bones){if(bones[k]){baseX[k]=bones[k].rotation.x;baseY[k]=bones[k].rotation.y;}}
   return{bones,baseX,baseY};
 }
-// Crea una instancia del modelo X Bot. opts.tpose=true (zombies, por ahora) deja el
-// modelo tal cual sale del FBX, en T-pose, sin animación. Por defecto (jugadores,
-// vistas previas de menú/inventario) se reproduce la animación real de Walking.fbx
-// mediante un AnimationMixer propio de la instancia.
+// Crea una instancia del modelo Low Poly Man. opts.tpose=true (zombies, por ahora) deja el
+// modelo tal cual sale del FBX, en su pose de referencia. Por defecto (jugadores, vistas
+// previas de menú/inventario) queda listo para que poseHumanoidFbx() lo anime cada frame.
 function spawnCharVisual(material,opts){
   if(!charTemplateReady)return null;
   opts=opts||{};
@@ -108,23 +91,50 @@ function spawnCharVisual(material,opts){
   inst.traverse(o=>{if(o.isMesh){o.material=material;}});
   const rig=_fbxFindBones(inst);
   inst.userData.bones=rig.bones;inst.userData.baseX=rig.baseX;inst.userData.baseY=rig.baseY;
-  if(!opts.tpose&&walkClipReady){
-    const mixer=new THREE.AnimationMixer(inst);
-    const action=mixer.clipAction(walkClip);
-    action.play();
-    inst.userData.mixer=mixer;
-    inst.userData.walkAction=action;
-  }
+  inst.userData.isPlayerRig=!opts.tpose;
+  inst.userData.animPhase=Math.random()*6.28; // desincroniza el ciclo de piernas entre instancias
   return inst;
 }
 // Postura de apuntado con arma de fuego (relacionada con el arma equipada, no con el
 // ciclo de caminata): el brazo derecho se levanta al frente y el izquierdo acompaña
-// como apoyo de dos manos. Se aplica encima de la pose que dejó el AnimationMixer.
+// como apoyo de dos manos. Se aplica encima de la pose que dejó poseHumanoidFbx.
 function animateFbxAim(B,X,aimAmt){
   if(B.shR)B.shR.rotation.x=(X.shR||0)+0.95*aimAmt;
   if(B.elR)B.elR.rotation.x=(B.elR.rotation.x||0)+0.35*aimAmt;
   if(B.shL)B.shL.rotation.x=(X.shL||0)+0.55*aimAmt;
   if(B.elL)B.elL.rotation.x=(B.elL.rotation.x||0)+0.55*aimAmt;
+}
+// ===== Animación por código de los JUGADORES (Low Poly Man) =====
+// Si alguna articulación se dobla "al revés" en pantalla (p.ej. la rodilla dobla hacia
+// adelante en vez de hacia atrás), cambia el signo correspondiente aquí (1 <-> -1). Es lo
+// único que depende de cómo quedaron orientados los huesos al exportar este FBX en concreto.
+const FBX_RIG_SIGN={hip:1,knee:-1,shoulder:1,elbow:1,spine:1};
+// params: phase (fase del ciclo de piernas), moveAmt (0-1, cuánto está caminando/corriendo),
+// crouchAmt (0-1, agachado), jumpAmt (0-1, en el aire), aimAmt (0-1, apuntando con arma).
+function poseHumanoidFbx(inst,params){
+  if(!inst||!inst.userData.bones)return;
+  const B=inst.userData.bones,X=inst.userData.baseX;
+  params=params||{};
+  const moveAmt=clamp(params.moveAmt||0,0,1),crouchAmt=clamp(params.crouchAmt||0,0,1),
+        jumpAmt=clamp(params.jumpAmt||0,0,1),phase=params.phase||0,aimAmt=params.aimAmt||0;
+  const S=FBX_RIG_SIGN,idleAmt=1-Math.max(moveAmt,jumpAmt);
+  const idleSway=Math.sin(phase*0.6)*0.045*idleAmt; // leve balanceo al estar quieto (idle)
+  const legBend=crouchAmt*0.5+jumpAmt*0.5; // piernas dobladas al agacharse o saltar
+  const kneeBend=crouchAmt*0.8+jumpAmt*0.95;
+  const walkAmp=moveAmt*0.55*(1-jumpAmt);
+  const swing=Math.sin(phase)*walkAmp; // caminar (piernas alternadas)
+  const kneeSwingL=Math.max(0,Math.cos(phase))*moveAmt*0.75*(1-jumpAmt);
+  const kneeSwingR=Math.max(0,-Math.cos(phase))*moveAmt*0.75*(1-jumpAmt);
+  if(B.upL)B.upL.rotation.x=(X.upL||0)+S.hip*(legBend+swing);
+  if(B.upR)B.upR.rotation.x=(X.upR||0)+S.hip*(legBend-swing);
+  if(B.loL)B.loL.rotation.x=(X.loL||0)+S.knee*(kneeBend+kneeSwingL);
+  if(B.loR)B.loR.rotation.x=(X.loR||0)+S.knee*(kneeBend+kneeSwingR);
+  if(B.shL)B.shL.rotation.x=(X.shL||0)+S.shoulder*(-swing*0.75+idleSway-jumpAmt*0.35);
+  if(B.shR)B.shR.rotation.x=(X.shR||0)+S.shoulder*(swing*0.75-idleSway-jumpAmt*0.35);
+  if(B.elL)B.elL.rotation.x=(X.elL||0)+S.elbow*(0.18+Math.max(0,swing)*0.5+jumpAmt*0.3);
+  if(B.elR)B.elR.rotation.x=(X.elR||0)+S.elbow*(0.18+Math.max(0,-swing)*0.5+jumpAmt*0.3);
+  if(B.spine)B.spine.rotation.x=(X.spine||0)+S.spine*(crouchAmt*0.22+idleAmt*Math.sin(phase*0.6)*0.02);
+  if(aimAmt)animateFbxAim(B,X,aimAmt);
 }
 function syncFbxZombie(z){
   const inst=z.fbxInst;if(!inst)return;
@@ -335,7 +345,7 @@ flushBT();
 function assignNetworkIds(){doors.forEach((d,i)=>{d.netId=i;});windows.forEach((w,i)=>{w.netId=i;});lootCrates.forEach((c,i)=>{c.netId=i;});grounditems.forEach((g,i)=>{g.netId=i;});cars.forEach((c,i)=>{c.netId=i;});}
 assignNetworkIds();
 const targets=[];const zombies=[];let nextZombieNetId=0;const bloodParticles=[];function makeZombieMesh(){const grp=new THREE.Group();scene.add(grp);const skinHue=0.27+rand(-0.03,0.04);const skinCol=new THREE.Color().setHSL(skinHue,0.32,0.30+rand(-0.06,0.05));
-const clothCol=new THREE.Color().setHSL(0.33+rand(-0.04,0.04),0.6,0.28+rand(-0.06,0.08));const bodyMat=new THREE.MeshLambertMaterial({color:clothCol});const headMat=new THREE.MeshLambertMaterial({color:skinCol});
+const clothCol=new THREE.Color().setHSL(0.33+rand(-0.03,0.03),0.62,0.4+rand(-0.06,0.08));const bodyMat=new THREE.MeshLambertMaterial({color:clothCol});const headMat=new THREE.MeshLambertMaterial({color:skinCol});
 const hips=new THREE.Group();hips.position.y=0.92;grp.add(hips);const torso=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.58,0.28),bodyMat);torso.position.y=0.40;hips.add(torso);
 const chestDetail=new THREE.Mesh(new THREE.BoxGeometry(0.52,0.14,0.06),bodyMat);chestDetail.position.set(0,0.55,0.15);hips.add(chestDetail);const neck=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.1,0.12,6),headMat);
 neck.position.y=0.72;hips.add(neck);const headPivot=new THREE.Group();headPivot.position.y=0.86;hips.add(headPivot);const head=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.32,0.32),headMat);headPivot.add(head);
@@ -381,7 +391,7 @@ const standTarget=groundHeightAt(z.x,z.z,z.standY);z.standY=(z.standY===undefine
 const targetAnimSpeed=z.netMoving?2.4:0;z.animSpeed=(z.animSpeed===undefined?targetAnimSpeed:z.animSpeed+(targetAnimSpeed-z.animSpeed)*Math.min(1,dt*6));z.walkPhase=(z.walkPhase||0)+dt*z.animSpeed;
 const targetAmp=z.animSpeed>0.45?0.85:0;z.walkAmp=(z.walkAmp===undefined?targetAmp:z.walkAmp+(targetAmp-z.walkAmp)*Math.min(1,dt*5));const swing=Math.sin(z.walkPhase)*0.55*z.walkAmp;
 z.legL.hip.rotation.x=swing;z.legR.hip.rotation.x=-swing;z.hips.position.y=0.92+Math.abs(Math.sin(z.walkPhase))*0.035*z.walkAmp;z.ap=(z.ap||.4)+((z.netMoving?1.1:.4)-(z.ap||.4))*Math.min(1,dt*4);
-z.armL.shoulder.rotation.x=-swing*0.7-z.ap;z.armR.shoulder.rotation.x=swing*0.7-z.ap;z.headPivot.rotation.y+=(0-z.headPivot.rotation.y)*Math.min(1,dt*3);/* syncFbxZombie(z); -- desactivado: el X Bot de los zombies se queda en T-pose por ahora */}}
+z.armL.shoulder.rotation.x=-swing*0.7-z.ap;z.armR.shoulder.rotation.x=swing*0.7-z.ap;z.headPivot.rotation.y+=(0-z.headPivot.rotation.y)*Math.min(1,dt*3);/* syncFbxZombie(z); -- desactivado: el modelo de los zombies se queda en su pose de referencia por ahora */}}
 const weaponGroup=new THREE.Group();weaponGroup.position.set(0.26,-0.26,-0.68);weaponGroup.rotation.y=-0.03;weaponGroup.rotation.z=0.01;
 camera.add(weaponGroup);const slideMat=new THREE.MeshLambertMaterial({color:0x3a3d3f});const frameMat=new THREE.MeshLambertMaterial({color:0x1c1c1c});const barrelMat=new THREE.MeshLambertMaterial({color:0x14161a});
 const weaponMesh=new THREE.Mesh(new THREE.BoxGeometry(0.085,0.11,0.40),slideMat);weaponMesh.position.set(0,0.04,-0.03);weaponGroup.add(weaponMesh);const weaponBarrel=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.16,8),barrelMat);
@@ -463,7 +473,7 @@ lobbyMannequin.rotation.y=-0.5;
 lobbyRenderer=new THREE.WebGLRenderer({canvas:lobbyCanvas,antialias:true,alpha:true});lobbyRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
 resizeLobbyRenderer();window.addEventListener('resize',resizeLobbyRenderer);}
 function renderLobbyPreview(dt){if(!lobbyRenderer)return;lobbyT+=dt;lobbyMannequin.rotation.y=-0.5+Math.sin(lobbyT*0.32)*0.55;lobbyMannequin.position.y=Math.sin(lobbyT*1.05)*0.018;
-if(lFbx&&lFbx.userData.mixer)lFbx.userData.mixer.update(dt);
+if(lFbx)poseHumanoidFbx(lFbx,{phase:lobbyT*1.6,moveAmt:0,crouchAmt:0,jumpAmt:0});
 lobbyRenderer.render(lobbyScene,lobbyCam);}
 function updateCharacterPreview(){cBackpack.visible= !!equip.backpack;updateEquippedAppearance();const shown=equip.primary||equip.secondary;buildHandItemMesh(shown?shown.id:null);
 if(charRenderer)charRenderer.render(charScene,charCam);}const useMesh=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.12,0.12),new THREE.MeshLambertMaterial({color:0xffcf6b}));
@@ -591,7 +601,7 @@ const baseArmL= -swing*0.7-z.ap,baseArmR=swing*0.7-z.ap;const elbowSway=Math.sin
 const p=1-z.attackAnimT;let raise,elbowT;if(p<0.28){const k=p/0.28;const ek=k*k*(3-2*k);raise=ek;elbowT=ek*0.3;}else{const k=Math.min(1,(p-0.28)/0.72);const ek=1-Math.pow(1-k,2);raise=1-ek;elbowT=0.3*(1-ek);}
 z.armL.shoulder.rotation.x= -Math.PI*0.85*raise-0.2;z.armR.shoulder.rotation.x= -Math.PI*0.85*raise-0.2;z.armL.elbow.rotation.x= -0.15*raise-elbowT;z.armR.elbow.rotation.x= -0.15*raise-elbowT;
 z.hips.position.z= -0.12*Math.sin(Math.min(1,p/0.6)*Math.PI);}else{z.armL.shoulder.rotation.x=baseArmL;z.armR.shoulder.rotation.x=baseArmR;z.armL.elbow.rotation.x= -0.5+elbowSway;z.armR.elbow.rotation.x= -0.5+elbowSway;
-z.hips.position.z+=(0-z.hips.position.z)*Math.min(1,dt*6);}/* syncFbxZombie(z); -- desactivado: el X Bot de los zombies se queda en T-pose por ahora */}}function findNearestInteractable(){let best=null,bestD=Infinity,bestType=null;if(isDriving)return{ref:drivingCar,type:'car_exit'};
+z.hips.position.z+=(0-z.hips.position.z)*Math.min(1,dt*6);}/* syncFbxZombie(z); -- desactivado: el modelo de los zombies se queda en su pose de referencia por ahora */}}function findNearestInteractable(){let best=null,bestD=Infinity,bestType=null;if(isDriving)return{ref:drivingCar,type:'car_exit'};
 for(const car of cars){const d=Math.hypot(car.x-player.x,car.z-player.z);if(d<3.4&&d<bestD){bestD=d;best=car;bestType='car';}}for(const gi of grounditems){const d=Math.hypot(gi.x-player.x,gi.z-player.z);if(d<2.4&&d<bestD){bestD=d;best=gi;bestType='item';}}
 for(const c of lootCrates){if(c.opened)continue;const d=Math.hypot(c.x-player.x,c.z-player.z);if(d<2.6&&d<bestD&&Math.abs((c.y||0)-player.standY)<2.2){bestD=d;best=c;bestType='crate';}}
 for(const dr of doors){const d=Math.hypot(dr.x-player.x,dr.z-player.z);const fy=dr.floorY||0;if(d<2.8&&d<bestD&&player.standY>=fy-.2&&player.standY<=fy+(dr.doorHeight||2.3)+.2){bestD=d;best=dr;bestType='door';}}for(const w of windows){if(!w.broken||Math.abs(w.x-player.x)>2||Math.abs(w.z-player.z)>2)continue;const d=Math.hypot(w.x-player.x,w.z-player.z);if(d<1.9&&d<bestD&&Math.abs(w.sillY-.9-player.standY)<1.6){bestD=d;best=w;bestType='window';}}
@@ -728,7 +738,7 @@ document.getElementById('stBar').style.width=player.stamina+'%';document.getElem
 function die(){player.alive=false;document.getElementById('deathStats').textContent='Has caído en combate.';document.getElementById('deathScreen').style.display='flex';document.exitPointerLock();
 }document.getElementById('respawnBtn').onclick=()=>{player.alive=true;player.bleed=false;player.falling=false;player.vault=null;player.hp=100;player.hunger=85;player.thirst=85;player.stamina=100;
 player.x=SPAWN.x;player.z=SPAWN.z;player.safeOK=false;player._jumpY=0;player.vy=0;player.onGround=true;isDriving=false;drivingCar=null;document.getElementById('deathScreen').style.display='none';
-};function loop(now){if(tabHidden){requestAnimationFrame(loop);return;}const dt=Math.min(0.05,(now-last)/1000);last=now;if(gameStarted){update(dt);renderer.render(scene,camera);}else{renderLobbyPreview(dt);}if(anyPanelOpen()&&charRenderer){charMannequin.rotation.y+=dt*0.5;invPreviewT+=dt;if(cFbx&&cFbx.userData.mixer)cFbx.userData.mixer.update(dt);charRenderer.render(charScene,charCam);}
+};function loop(now){if(tabHidden){requestAnimationFrame(loop);return;}const dt=Math.min(0.05,(now-last)/1000);last=now;if(gameStarted){update(dt);renderer.render(scene,camera);}else{renderLobbyPreview(dt);}if(anyPanelOpen()&&charRenderer){charMannequin.rotation.y+=dt*0.5;invPreviewT+=dt;if(cFbx)poseHumanoidFbx(cFbx,{phase:invPreviewT*1.6,moveAmt:0,crouchAmt:0,jumpAmt:0});charRenderer.render(charScene,charCam);}
 requestAnimationFrame(loop);}document.getElementById('keysToggle').onclick=()=>{document.getElementById('keysPanel').classList.toggle('show');};requestAnimationFrame(loop);let deferredInstallPrompt=null;window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();deferredInstallPrompt=e;const ib=document.getElementById('installBtn');if(ib)ib.style.display='inline-block';});
 const installBtnEl=document.getElementById('installBtn');if(installBtnEl){if(window.matchMedia('(display-mode: standalone)').matches)installBtnEl.style.display='none';installBtnEl.onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;installBtnEl.style.display='none';}else{showMsg('En iOS: usa Compartir ▸ Añadir a pantalla de inicio');}};}
 function requestGameFullscreen(){const el=document.documentElement;const req=el.requestFullscreen||el.webkitRequestFullscreen||el.mozRequestFullScreen||el.msRequestFullscreen;if(req){try{req.call(el).catch(()=>{});}catch(e){}}if(screen.orientation&&screen.orientation.lock){try{screen.orientation.lock('landscape').catch(()=>{});}catch(e){}}}
@@ -741,13 +751,13 @@ document.getElementById('startBtn').onclick=function(){
 /* ===== Puente para el módulo de red multijugador (window.MPNet) ===== */
 window.__game={
 THREE,scene,camera,SPAWN,bullets,player,
-spawnCharVisual,charTemplateReady:()=>charTemplateReady,animateFbxAim,
+spawnCharVisual,charTemplateReady:()=>charTemplateReady,animateFbxAim,poseHumanoidFbx,
 showMsg,flashHurt,spawnBloodImpact,showHitMarker,
 equip,ITEMS,activeSlotKey:()=>activeSlotKey,
 beginMatch,
 spawnInitialZombies,
 isAlive:()=>player.alive,
-getLocalState:()=>{const it=equip[activeSlotKey];const meta=it?ITEMS[it.id]:null;const wKind=meta?(meta.ranged?'ranged':meta.melee?'melee':'item'):'none';return{x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive,jumpY:+((player._jumpY)||0).toFixed(2),wKind,wId:it?it.id:null};},
+getLocalState:()=>{const it=equip[activeSlotKey];const meta=it?ITEMS[it.id]:null;const wKind=meta?(meta.ranged?'ranged':meta.melee?'melee':'item'):'none';return{x:player.x,z:player.z,yaw:player.yaw,hp:player.hp,alive:player.alive,jumpY:+((player._jumpY)||0).toFixed(2),crouch:isCrouching,wKind,wId:it?it.id:null};},
 getZombieSnapshot:function(){return zombies.filter(z=>!z.remote).map(z=>({id:z.netId,x:+z.x.toFixed(1),z:+z.z.toFixed(1),h:+z.heading.toFixed(2),hp:Math.max(0,Math.round(z.hp)),alive:z.alive,ty:z.t===ZT[1]?1:z.t===ZT[2]?2:0,sc:z.grp.scale.x,mv:Math.hypot(z.vx||0,z.vz||0)>0.3?1:0}));},
 applyZombieSnapshot:function(list){for(const e of list){let z=zombies.find(zz=>zz.netId===e.id);if(!z)z=createRemoteZombie(e.id,e.x,e.z,e.ty,e.sc);if(!z)continue;z.tx=e.x;z.tz=e.z;z.theading=e.h;z.hp=e.hp;z.netMoving=e.mv;if(e.alive===false&&z.alive){z.alive=false;killZombie(z,{x:Math.sin(e.h),z:Math.cos(e.h)});}}},
 applyZombieHit:function(netId,dmg,bleed){const z=zombies.find(zz=>zz.netId===netId&&zz.alive&&!zz.remote);if(!z)return;z.hp-=dmg;z.hitFlash=0.15;if(bleed){z.bleedTimer=bleed.bleedDuration||4;z.bleedDmgPerSec=bleed.bleedDmg;z.bleedTickTimer=0;}if(z.hp<=0)killZombie(z);},
