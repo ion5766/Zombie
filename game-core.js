@@ -82,7 +82,8 @@ function _fbxFindBones(inst){
     console.error('%c[Modelo FBX] No se encontraron estos huesos en el modelo: '+missing.join(', ')+'. Revisa los nombres reales de los huesos del FBX (los puedes ver imprimiendo inst.traverse en consola) y actualiza _fbxFindBones().','color:#ff5555');
   }
   const baseX={},baseY={};
-  for(const k in bones){if(bones[k]){baseX[k]=bones[k].rotation.x;baseY[k]=bones[k].rotation.y;}}
+  for(const k in bones){if(bones[k]){baseX[k]=bones[k].rotation.x;baseY[k]=bones[k].rotation.y;
+    if(k==='shL')baseX.shLz=bones[k].rotation.z;if(k==='shR')baseX.shRz=bones[k].rotation.z;}}
   return{bones,baseX,baseY};
 }
 // Crea una instancia del modelo Low Poly Man. opts.tpose=true (zombies, por ahora) deja el
@@ -116,6 +117,16 @@ function animateFbxAim(B,X,aimAmt){
 // adelante en vez de hacia atrás), cambia el signo correspondiente aquí (1 <-> -1). Es lo
 // único que depende de cómo quedaron orientados los huesos al exportar este FBX en concreto.
 const FBX_RIG_SIGN={hip:1,knee:-1,shoulder:1,elbow:1,spine:1};
+// La pose de referencia (bind pose) de este FBX en concreto es un T-POSE real: los brazos
+// quedan estirados en horizontal hacia los costados. Todo lo demás en esta función (swing,
+// idleSway...) solo suma pequeños grados ENCIMA de esa pose base, así que sin esto los brazos
+// se quedan prácticamente en T-pose todo el rato (solo tiemblan un poco). Este valor rota el
+// hombro para bajar el brazo desde el T-pose hasta un reposo natural a los costados. El EJE
+// correcto (x/y/z) y el signo dependen de cómo quedó orientado el hueso al exportar el FBX,
+// así que si el brazo baja de más/menos o se cruza raro, prueba: 1) otro valor en vez de 1.35
+// (más grande = brazo más pegado al cuerpo), 2) cambiar '.z' por '.y' en las 2 líneas de abajo,
+// 3) invertir el signo (quitar el "-" de uno de los dos, o ponérselo a ambos).
+const ARM_DOWN_FROM_TPOSE=1.35;
 // params: phase (fase del ciclo de piernas), moveAmt (0-1, cuánto está caminando/corriendo),
 // crouchAmt (0-1, agachado), jumpAmt (0-1, en el aire), aimAmt (0-1, apuntando con arma).
 function poseHumanoidFbx(inst,params){
@@ -138,6 +149,8 @@ function poseHumanoidFbx(inst,params){
   if(B.loR)B.loR.rotation.x=(X.loR||0)+S.knee*(kneeBend+kneeSwingR);
   if(B.shL)B.shL.rotation.x=(X.shL||0)+S.shoulder*(-swing*0.75+idleSway-jumpAmt*0.35);
   if(B.shR)B.shR.rotation.x=(X.shR||0)+S.shoulder*(swing*0.75-idleSway-jumpAmt*0.35);
+  if(B.shL)B.shL.rotation.z=(X.shLz||0)-ARM_DOWN_FROM_TPOSE;
+  if(B.shR)B.shR.rotation.z=(X.shRz||0)+ARM_DOWN_FROM_TPOSE;
   if(B.elL)B.elL.rotation.x=(X.elL||0)+S.elbow*(0.18+Math.max(0,swing)*0.5+jumpAmt*0.3);
   if(B.elR)B.elR.rotation.x=(X.elR||0)+S.elbow*(0.18+Math.max(0,-swing)*0.5+jumpAmt*0.3);
   if(B.spine)B.spine.rotation.x=(X.spine||0)+S.spine*(crouchAmt*0.22+idleAmt*Math.sin(phase*0.6)*0.02);
