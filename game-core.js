@@ -150,7 +150,15 @@ function poseHumanoidFbx(inst,params){
   if(B.shL)B.shL.rotation.x=(X.shL||0)+S.shoulder*(-swing*0.75+idleSway-jumpAmt*0.35);
   if(B.shR)B.shR.rotation.x=(X.shR||0)+S.shoulder*(swing*0.75-idleSway-jumpAmt*0.35);
   if(B.shL)B.shL.rotation.z=(X.shLz||0)-ARM_DOWN_FROM_TPOSE;
-  if(B.shR)B.shR.rotation.z=(X.shRz||0)+ARM_DOWN_FROM_TPOSE;
+  if(B.shR)B.shR.rotation.z=(X.shRz||0)-ARM_DOWN_FROM_TPOSE;
+  // --- DIAGNÓSTICO TEMPORAL: imprime en consola 1 vez por segundo si el hueso existe y qué
+  // rotación tiene realmente en cada frame. Bórralo cuando ya funcione. ---
+  poseHumanoidFbx._dbgT=(poseHumanoidFbx._dbgT||0)+1;
+  if(poseHumanoidFbx._dbgT%60===0){
+    const deg=v=>((v||0)*180/Math.PI).toFixed(1)+'°';
+    if(!B.shL)console.log('%c[DEBUG hombro] B.shL es null/undefined (no se encontró el hueso Shoulder_L en esta instancia)','color:#ffaa00');
+    else console.log('%c[DEBUG hombro] Shoulder_L rotation → x:'+deg(B.shL.rotation.x)+' y:'+deg(B.shL.rotation.y)+' z:'+deg(B.shL.rotation.z)+' | base capturada X.shLz='+deg(X.shLz),'color:#ffaa00');
+  }
   if(B.elL)B.elL.rotation.x=(X.elL||0)+S.elbow*(0.18+Math.max(0,swing)*0.5+jumpAmt*0.3);
   if(B.elR)B.elR.rotation.x=(X.elR||0)+S.elbow*(0.18+Math.max(0,-swing)*0.5+jumpAmt*0.3);
   if(B.spine)B.spine.rotation.x=(X.spine||0)+S.spine*(crouchAmt*0.22+idleAmt*Math.sin(phase*0.6)*0.02);
